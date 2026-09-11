@@ -173,7 +173,7 @@ const composeLandscapeBoard = async (capture: MapCapture, format: 'png' | 'jpg',
   context.font = '700 17px Arial'
   drawWrappedText(context, 'Mapa Temático Consulta Lote registrado e área pública ocupada', panelX + 220, 42, 320, 22)
   context.font = '14px Arial'
-  context.fillText('Advanced Lotes · DF Legal', panelX + 220, 96)
+  context.fillText('Análise de Interferências · DF Legal', panelX + 220, 96)
   context.fillStyle = '#526166'
   context.font = '12px Arial'
   const wkid = capture.spatialReference.latestWkid || capture.spatialReference.wkid
@@ -226,7 +226,7 @@ const composeLandscapeBoard = async (capture: MapCapture, format: 'png' | 'jpg',
 
   context.fillStyle = '#B93835'
   context.font = '700 19px Arial'
-  context.fillText('ÁREA PÚBLICA', contentX, y)
+  context.fillText('INTERFERÊNCIA ESPACIAL', contentX, y)
   y += 30
   context.fillStyle = '#173C46'
   context.font = '14px Arial'
@@ -249,13 +249,13 @@ const composeLandscapeBoard = async (capture: MapCapture, format: 'png' | 'jpg',
     y += 12
     context.fillStyle = publicArea.hasPublicArea ? '#B93835' : '#526166'
     context.font = '700 14px Arial'
-    y = drawWrappedText(context, publicArea.hasPublicArea ? `Área pública ocupada identificada: área total ${formatSquareMeters(publicArea.geometricPublicArea)}.` : 'Não há área pública ocupada pela regra configurada.', contentX, y, contentWidth, 20)
+    y = drawWrappedText(context, publicArea.hasPublicArea ? `Interferência espacial identificada: área total ${formatSquareMeters(publicArea.geometricPublicArea)}.` : 'Não há área pública ocupada pela regra configurada.', contentX, y, contentWidth, 20)
     context.fillStyle = '#526166'
     context.font = '12px Arial'
     y = drawWrappedText(context, 'Hachura = diferença espacial entre ocupação e lote. Excedente = diferença numérica entre as áreas informadas na tabela.', contentX, y + 2, contentWidth, 17)
   } else {
     context.fillStyle = '#526166'
-    context.fillText('Análise não executada.', contentX, y)
+    context.fillText('Análise de interferência não executada.', contentX, y)
     y += 24
   }
 
@@ -295,7 +295,7 @@ const composeLandscapeBoard = async (capture: MapCapture, format: 'png' | 'jpg',
   context.strokeRect(contentX + 260, legendY + 40, 20, 14)
   context.fillStyle = '#B93835'
   context.font = '700 13px Arial'
-  context.fillText('Área pública ocupada (hachura)', contentX + 290, legendY + 52)
+  context.fillText('Interferência espacial (hachura)', contentX + 290, legendY + 52)
   context.strokeStyle = '#4E5B60'
   context.lineWidth = 4
   context.strokeRect(8, 8, canvas.width - 16, canvas.height - 16)
@@ -454,7 +454,7 @@ export default function Home() {
       setStatus('Calculando a diferença geométrica entre ocupação e lote…')
       const result = await runtimeRef.current.analysePublicArea(occupationSelection)
       setPublicArea(result)
-      setStatus(result.hasPublicArea ? 'Área pública ocupada destacada no mapa.' : 'Análise concluída sem área pública hachurada.')
+      setStatus(result.hasPublicArea ? 'Interferência espacial destacada no mapa.' : 'Análise concluída sem área pública hachurada.')
     } catch (analysisError) {
       setError(analysisError instanceof Error ? analysisError.message : 'Não foi possível calcular a área pública.')
     }
@@ -470,7 +470,7 @@ export default function Home() {
       const dataUrl = await composeLandscapeBoard(capture, format, dimensions, publicArea, lotSelection, occupationSelection)
       const link = document.createElement('a')
       link.href = dataUrl
-      link.download = `advanced-lotes-df-legal-${new Date().toISOString().slice(0, 10)}.${format}`
+      link.download = `interferencias-df-legal-${new Date().toISOString().slice(0, 10)}.${format}`
       link.click()
       setStatus(`Prancha paisagem em ${format.toUpperCase()} baixada com mapa, cotas e quadro analítico.`)
     } catch (imageError) {
@@ -504,10 +504,10 @@ export default function Home() {
           ].join('\n')
         : 'Nenhuma análise de área pública executada.'
       const selectionText = [
-        lotSelection ? `Lote: ${lotSelection.title}\nÁrea informada: ${formatSquareMeters(lotSelection.reportedArea)}` : 'Lote: não selecionado.',
-        occupationSelection ? `Ocupação: ${occupationSelection.title}\nÁrea informada: ${formatSquareMeters(occupationSelection.reportedArea)}` : 'Ocupação: não selecionada.',
+        lotSelection ? `Lote: ${lotSelection.title}\nÁrea informada: ${formatSquareMeters(lotSelection.reportedArea)}` : 'Referência: não selecionada.',
+        occupationSelection ? `Ocupação: ${occupationSelection.title}\nÁrea informada: ${formatSquareMeters(occupationSelection.reportedArea)}` : 'Conflito: não selecionado.',
       ].join('\n\n')
-      const fileUrl = await runtimeRef.current.printAnalysis(settings, 'Análise de Lote — DF Legal', analysisText, selectionText)
+      const fileUrl = await runtimeRef.current.printAnalysis(settings, 'Análise de Interferências — DF Legal', analysisText, selectionText)
       window.open(fileUrl, '_blank', 'noopener,noreferrer')
       setStatus('PDF gerado. A nova aba contém o arquivo devolvido pelo serviço.')
     } catch (printError) {
@@ -532,7 +532,7 @@ export default function Home() {
             <img src={officialLogoUrl} alt="Logo oficial DF Legal" className="brand-mark" />
             <div>
               <p className="eyebrow">DF LEGAL · ANÁLISE ESPACIAL</p>
-              <h1>Advanced<br />Lotes</h1>
+              <h1>DF Legal<br />Interferências</h1>
             </div>
           </header>
 
@@ -545,16 +545,16 @@ export default function Home() {
           </section>
 
           <section className="tool-cluster" aria-label="Ferramentas de análise">
-            <p className="section-label">ANÁLISE DO LOTE</p>
+            <p className="section-label">ANÁLISE DE INTERFERÊNCIAS</p>
             <div className="selection-mode" role="group" aria-label="Camada a selecionar no mapa">
               <button type="button" className={selectionMode === 'lote' ? 'is-selected' : ''} onClick={() => changeSelectionMode('lote')}>
-                Selecionar lote
+                Selecionar camada de referência
               </button>
               <button type="button" className={selectionMode === 'ocupacao' ? 'is-selected' : ''} onClick={() => changeSelectionMode('ocupacao')}>
-                Selecionar ocupação
+                Selecionar camada de conflito
               </button>
             </div>
-            <p className="selection-hint">Modo ativo: <strong>{selectionMode === 'lote' ? 'Lote' : 'Ocupação'}</strong>. As duas seleções permanecem ativas para a análise.</p>
+            <p className="selection-hint">Modo ativo: <strong>{selectionMode === 'lote' ? 'Referência' : 'Conflito'}</strong>. Selecione as duas feições para cruzar suas geometrias.</p>
             <div className="feature-search">
               <div className="feature-search-entry">
                 <Search size={15} aria-hidden="true" />
@@ -583,11 +583,11 @@ export default function Home() {
             </div>
             <Button onClick={drawDimensions} disabled={!mapIsLoaded || !selectionIsLot} className="tool-button tool-button-dimension">
               <Ruler size={18} strokeWidth={1.8} />
-              <span><strong>Cotar segmentos</strong><small>Desenha cada medida do lote</small></span>
+              <span><strong>Medir geometria</strong><small>Calcula os segmentos da referência</small></span>
             </Button>
             <Button onClick={analysePublicArea} disabled={!mapIsLoaded || !selectionIsOccupation} className="tool-button tool-button-alert">
               <AlertTriangle size={18} strokeWidth={1.8} />
-              <span><strong>Ver área pública</strong><small>Hachura o excedente geométrico</small></span>
+              <span><strong>Analisar interferência</strong><small>Hachura a diferença geométrica</small></span>
             </Button>
             <Button onClick={clearAnalysis} disabled={!mapIsLoaded} variant="ghost" className="tool-button tool-button-clear">
               <Trash2 size={17} strokeWidth={1.8} />
@@ -629,15 +629,15 @@ export default function Home() {
 
         {!mapIsLoaded && (
           <div className="map-empty-state">
-            <img src="/manus-storage/cadastral-detail-reference_52d4cd42.jpg" alt="Referência abstrata de loteamento cadastral" />
+            <img src="/manus-storage/interference-detail-reference" alt="Diagrama de análise de interferência espacial" />
             <div className="map-empty-overlay" />
             <div className="empty-copy">
               <span className="eyebrow">ESTADO 01 · MAPA NÃO CONECTADO</span>
               <h2>Aguardando Web Map.</h2>
               <p>Informe o ID do item para carregar as camadas operacionais e habilitar a seleção espacial.</p>
               <div className="operational-readout" aria-label="Estado da conexão">
-                <div><span>CAMADA-ALVO A</span><strong>Lotes Registrados</strong></div>
-                <div><span>CAMADA-ALVO B</span><strong>Ocupacoes Identificadas</strong></div>
+                <div><span>CAMADA DE REFERÊNCIA</span><strong>Lotes Registrados</strong></div>
+                <div><span>CAMADA DE CONFLITO</span><strong>Ocupacoes Identificadas</strong></div>
                 <div><span>SAÍDA</span><strong>Export Web Map · PDF</strong></div>
               </div>
               <Button onClick={() => setConfigurationOpen(true)}><Settings2 size={16} /> Configurar conexão</Button>
@@ -647,7 +647,7 @@ export default function Home() {
 
         {selection && (
           <div className={`selection-chip ${selection.kind}`}>
-            <span>{selection.kind === 'lote' ? 'LOTE SELECIONADO' : 'OCUPAÇÃO SELECIONADA'}</span>
+            <span>{selection.kind === 'lote' ? 'REFERÊNCIA SELECIONADA' : 'CONFLITO SELECIONADO'}</span>
             <strong>{selection.title}</strong>
             {selection.address && <small>Endereço: {selection.address}</small>}
             <small>Área informada: {formatSquareMeters(selection.reportedArea)}</small>
@@ -669,7 +669,7 @@ export default function Home() {
               )}
               {publicArea && (
                 <section className={publicArea.hasPublicArea ? 'public-result has-alert' : 'public-result'}>
-                  <div className="result-heading"><AlertTriangle size={16} /> <span>{publicArea.hasPublicArea ? 'Área pública ocupada' : 'Sem área pública hachurada'}</span></div>
+                  <div className="result-heading"><AlertTriangle size={16} /> <span>{publicArea.hasPublicArea ? 'Interferência espacial' : 'Sem interferência hachurada'}</span></div>
                   <div className="area-grid">
                     <div><small>OCUPAÇÃO</small><strong>{formatSquareMeters(publicArea.reportedOccupationArea)}</strong></div>
                     <div><small>LOTE</small><strong>{formatSquareMeters(publicArea.reportedLotArea)}</strong></div>
@@ -697,11 +697,11 @@ export default function Home() {
             <div className="form-grid">
               <label><span>Portal ArcGIS Enterprise</span><Input value={settings.portalUrl} onChange={(event) => updateSetting('portalUrl', event.target.value)} /></label>
               <label><span>ID do Web Map</span><Input placeholder="Ex.: 32 caracteres do item do mapa" value={settings.webMapId} onChange={(event) => updateSetting('webMapId', event.target.value)} /></label>
-              <label><span>Camada de lotes</span><Input value={settings.lotLayerTitle} onChange={(event) => updateSetting('lotLayerTitle', event.target.value)} /></label>
-              <label><span>Campo da área do lote</span><Input value={settings.lotAreaField} onChange={(event) => updateSetting('lotAreaField', event.target.value)} /></label>
-              <label><span>Camada de ocupações</span><Input value={settings.occupationLayerTitle} onChange={(event) => updateSetting('occupationLayerTitle', event.target.value)} /></label>
-              <label><span>Campo da área construída</span><Input value={settings.occupationAreaField} onChange={(event) => updateSetting('occupationAreaField', event.target.value)} /></label>
-              <label className="full-width"><span>Tarefa Export Web Map</span><Input value={settings.printServiceUrl} onChange={(event) => updateSetting('printServiceUrl', event.target.value)} /></label>
+              <label><span>Camada de referência</span><Input value={settings.lotLayerTitle} onChange={(event) => updateSetting('lotLayerTitle', event.target.value)} /></label>
+              <label><span>Campo de área da referência</span><Input value={settings.lotAreaField} onChange={(event) => updateSetting('lotAreaField', event.target.value)} /></label>
+              <label><span>Camada de conflito</span><Input value={settings.occupationLayerTitle} onChange={(event) => updateSetting('occupationLayerTitle', event.target.value)} /></label>
+              <label><span>Campo de área do conflito</span><Input value={settings.occupationAreaField} onChange={(event) => updateSetting('occupationAreaField', event.target.value)} /></label>
+              <label className="full-width"><span>Serviço Export Web Map (PDF)</span><Input value={settings.printServiceUrl} onChange={(event) => updateSetting('printServiceUrl', event.target.value)} /></label>
               <label className="full-width"><span>Nome do layout de impressão</span><Input value={settings.layoutName} onChange={(event) => updateSetting('layoutName', event.target.value)} /></label>
             </div>
             <div className="drawer-footer"><p>Não informe senha, token ou chave em nenhum campo.</p><Button onClick={loadMap} disabled={isLoadingMap}>{isLoadingMap ? <LoaderCircle className="animate-spin" size={17} /> : <MapPinned size={17} />}{isLoadingMap ? 'Autenticando e carregando…' : 'Entrar e carregar Web Map'}</Button></div>
