@@ -629,7 +629,7 @@ export default function Home() {
 
         {!mapIsLoaded && (
           <div className="map-empty-state">
-            <img src="/manus-storage/interference-detail-reference" alt="Diagrama de análise de interferência espacial" />
+            <div className="analysis-illustration" role="img" aria-label="Diagrama de análise de interferência espacial"><span /><span /><span /></div>
             <div className="map-empty-overlay" />
             <div className="empty-copy">
               <span className="eyebrow">ESTADO 01 · MAPA NÃO CONECTADO</span>
