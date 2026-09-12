@@ -42,7 +42,7 @@ export interface InterferenceRuntime {
   view: MapView
   layers: InterferenceLayerInfo[]
   drawStudyArea: () => Promise<Polygon | null>
-  analyzeStudyArea: (studyArea: Polygon, activeLayerIds: string[]) => Promise<{ records: InterferenceRecord[]; errors: string[] }>
+  analyzeStudyArea: (studyArea: Polygon) => Promise<{ records: InterferenceRecord[]; errors: string[] }>
   highlightRecord: (record: InterferenceRecord) => Promise<void>
   captureRecord: (record: InterferenceRecord) => Promise<string>
   captureMap: () => Promise<string>
@@ -157,14 +157,13 @@ export async function createInterferenceRuntime(
     return graphic?.geometry?.type === 'polygon' ? graphic.geometry as Polygon : null
   }
 
-  const analyzeStudyArea = async (studyArea: Polygon, activeLayerIds: string[]) => {
+  const analyzeStudyArea = async (studyArea: Polygon) => {
     resultLayer.removeAll()
     labelLayer.removeAll()
     const records: InterferenceRecord[] = []
     const errors: string[] = []
-    const active = layers.filter((entry) => activeLayerIds.includes(entry.id))
 
-    for (const entry of active) {
+    for (const entry of layers) {
       try {
         const query = entry.layer.createQuery()
         query.geometry = studyArea
@@ -175,13 +174,14 @@ export async function createInterferenceRuntime(
         const response = await entry.layer.queryFeatures(query)
         response.features.forEach((graphic, index) => {
           if (!graphic.geometry) return
+          const relation = geometryEngine.contains(studyArea, graphic.geometry) ? 'circunscrita' : geometryEngine.touches(studyArea, graphic.geometry) ? 'toca' : geometryEngine.overlaps(studyArea, graphic.geometry) ? 'sobreposição' : 'interseção'
           const record: InterferenceRecord = {
             id: `${entry.id}-${graphic.attributes?.[entry.layer.objectIdField] ?? index}`,
             layerTitle: entry.title,
             layerId: entry.id,
             geometryType: entry.geometryType!,
             graphic,
-            attributes: displayAttributes(graphic),
+            attributes: { ...displayAttributes(graphic), _relacao_espacial: relation },
           }
           records.push(record)
           resultLayer.add(new Graphic({ geometry: graphic.geometry, symbol: symbolFor(entry.geometryType!), attributes: { interferenceId: record.id } }))
