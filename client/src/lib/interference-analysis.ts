@@ -300,7 +300,12 @@ export async function createInterferenceRuntime(
   const captureSummary = async () => captureIsolated()
   const captureMap = async () => captureSummary()
   const setLayerSelection = (layerId: string | null) => {
-    layers.forEach((entry) => { entry.layer.visible = layerId === null ? entry.visible : entry.id === layerId })
+    // Explicitamente desliga todas as camadas antes de ligar a escolhida.
+    layers.forEach((entry) => { entry.layer.visible = false })
+    if (layerId) layers.find((entry) => entry.id === layerId)?.layer && (layers.find((entry) => entry.id === layerId)!.layer.visible = true)
+    resultLayer.graphics.forEach((graphic) => {
+      graphic.visible = layerId === null || graphic.attributes?.layerId === layerId || graphic.attributes?.interferenceId?.startsWith(`${layerId}-`)
+    })
   }
   const setLayerOpacity = (opacity: number) => {
     layers.forEach((entry) => { entry.layer.opacity = Math.max(0.1, Math.min(1, opacity)) })

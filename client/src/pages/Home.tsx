@@ -93,16 +93,12 @@ const drawBoardChrome = (context: CanvasRenderingContext2D, title: string, subti
 }
 
 const drawLegend = (context: CanvasRenderingContext2D, records: InterferenceRecord[], x: number, y: number, maxWidth: number) => {
-  const legendEntries = Array.from(new Map(records.flatMap((record) =>
-    (record.involvedLayers || [{ id: record.layerId, title: record.layerTitle, symbol: record.symbol, geometryType: record.geometryType }])
-      .map((entry) => [entry.id, { ...record, ...entry }] as const),
-  )).values())
-  context.fillStyle = '#173C46'; context.font = '700 18px Arial'; context.fillText('LEGENDA DAS CAMADAS PARTICIPANTES', x, y)
-  let legendX = x
-  let legendY = y + 30
-  legendEntries.forEach((record) => {
-    const label = record.layerTitle.slice(0, 40)
-    const itemWidth = Math.min(420, 48 + label.length * 9)
+  const entries = Array.from(new Map(records.map((record) => [`${record.layerId}:${classValue(record)}`, record])).values())
+  context.fillStyle = '#173C46'; context.font = '700 18px Arial'; context.fillText('LEGENDA DAS CLASSES DAS INTERFERÊNCIAS', x, y)
+  let legendX = x; let legendY = y + 30
+  entries.forEach((record) => {
+    const label = classValue(record).slice(0, 42)
+    const itemWidth = Math.min(460, 48 + label.length * 9)
     if (legendX + itemWidth > x + maxWidth) { legendX = x; legendY += 30 }
     const swatch = symbolColor(record.symbol, record.geometryType === 'point' ? '#168AAD' : record.geometryType === 'polyline' ? '#F2B134' : '#E63946')
     context.fillStyle = swatch; context.fillRect(legendX, legendY - 15, 24, 16)
@@ -135,6 +131,42 @@ const composeInterferenceBoard = async (capture: CaptureResult, records: Interfe
   })
   drawLegend(context, records, 82, 1100, 1170)
   return format === 'jpg' ? canvas.toDataURL('image/jpeg', 0.92) : canvas.toDataURL('image/png')
+}
+
+const exportConsolidatedPdf = async (capture: CaptureResult, records: InterferenceRecord[]) => {
+  const image = await loadImage(capture.dataUrl)
+  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+  const pageWidth = 297; const pageHeight = 210; const margin = 12
+  const header = (title: string) => {
+    pdf.setFillColor(11, 48, 58); pdf.rect(0, 0, pageWidth, 24, 'F')
+    pdf.setTextColor(242, 177, 52); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(15); pdf.text('DF LEGAL · ANÁLISE DE INTERFERÊNCIAS', margin, 10)
+    pdf.setTextColor(255, 255, 255); pdf.setFontSize(10); pdf.text(title, margin, 18)
+  }
+  header('Prancha consolidada — mapa e interferências clipadas')
+  const mapX = margin; const mapY = 34; const mapW = 180; const mapH = 155
+  pdf.setFillColor(248, 248, 245); pdf.rect(mapX - 3, mapY - 3, mapW + 6, mapH + 6, 'F')
+  const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio
+  pdf.addImage(image, 'PNG', mapX + (mapW - drawW) / 2, mapY + (mapH - drawH) / 2, drawW, drawH)
+  pdf.setDrawColor(38, 61, 66); pdf.rect(mapX, mapY, mapW, mapH)
+  pdf.setTextColor(23, 60, 70); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.text('CONSOLIDADO', 205, 42)
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.text(`Interferências: ${records.length}`, 205, 52); pdf.text(`Classes: ${new Set(records.map(classValue)).size}`, 205, 59); pdf.text(`Camadas: ${new Set(records.map((record) => record.layerId)).size}`, 205, 66)
+  let ly=82
+  Array.from(new Map(records.map((record) => [`${record.layerId}:${classValue(record)}`, record])).values()).forEach((record) => {
+    const color = symbolColor(record.symbol, '#E63946'); const rgb = color.match(/rgba?\\(([^)]+)\\)/)?.[1].split(',').map(Number) || [230,57,70]
+    pdf.setFillColor(rgb[0] || 230, rgb[1] || 57, rgb[2] || 70); pdf.rect(205, ly - 4, 6, 4, 'F')
+    pdf.setTextColor(23,60,70); pdf.setFontSize(8); pdf.text(`${classValue(record).slice(0, 40)} — ${records.filter((item) => classValue(item) === classValue(record)).length}`, 214, ly); ly += 8
+  })
+  const rows = records.map((record, index) => ({ n:index+1, layer:record.layerTitle, klass:classValue(record), relation:String(record.attributes._relacao_espacial || 'interseção'), id:record.id }))
+  let index=0
+  while (index < rows.length) {
+    pdf.addPage(); header('Prancha consolidada — tabela de interferências')
+    pdf.setFillColor(23,60,70); pdf.rect(margin, 34, pageWidth-margin*2, 9, 'F'); pdf.setTextColor(255,255,255); pdf.setFont('helvetica','bold'); pdf.setFontSize(8); pdf.text('Nº', margin+3, 40); pdf.text('CAMADA', margin+18, 40); pdf.text('CLASSE DA INTERFERÊNCIA', margin+105, 40); pdf.text('RELAÇÃO', margin+220, 40); pdf.text('ID', margin+250, 40)
+    let y=43
+    for (let count=0; count<20 && index<rows.length; count++, index++) {
+      const row=rows[index]; pdf.setFillColor(count%2?245:234,248,247); pdf.rect(margin,y,pageWidth-margin*2,8,'F'); pdf.setTextColor(23,60,70); pdf.setFont('helvetica','normal'); pdf.setFontSize(8); pdf.text(String(row.n),margin+3,y+5); pdf.text(row.layer.slice(0,42),margin+18,y+5); pdf.text(row.klass.slice(0,58),margin+105,y+5); pdf.text(row.relation.slice(0,18),margin+220,y+5); pdf.text(row.id.slice(0,24),margin+250,y+5); y+=8
+    }
+  }
+  pdf.save(`prancha-consolidada-interferencias-${new Date().toISOString().slice(0,10)}.pdf`)
 }
 
 const composeSummaryInfographic = async (capture: CaptureResult, records: InterferenceRecord[]) => {
@@ -223,7 +255,7 @@ const exportSummaryPdf = (records: InterferenceRecord[]) => {
   pdf.text(`Total de interferências consolidadas: ${records.length}`, margin, 42)
   pdf.text(`Camadas participantes: ${groups.size}`, margin, 49)
   let y = 62
-  const drawTableHeader = () => { pdf.setFillColor(23, 60, 70); pdf.rect(margin, y, pageWidth - margin * 2, 9, 'F'); pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.text('CAMADA', margin + 3, y + 6); pdf.text('CLASSE / NOME DA INTERFERÊNCIA', margin + 76, y + 6); pdf.text('QTD.', pageWidth - margin - 18, y + 6); y += 9 }
+  const drawTableHeader = () => { pdf.setFillColor(23, 60, 70); pdf.rect(margin, y, pageWidth - margin * 2, 9, 'F'); pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.text('CAMADA', margin + 3, y + 6); pdf.text('CLASSE DA INTERFERÊNCIA', margin + 76, y + 6); pdf.text('QTD.', pageWidth - margin - 18, y + 6); y += 9 }
   drawTableHeader()
   for (const [layerTitle, classes] of Array.from(groups.entries())) {
     for (const [klass, count] of Array.from(classes.entries())) {
@@ -346,9 +378,9 @@ export default function Home() {
     if (!runtimeRef.current || !records.length) return
     setExportingBoard(true)
     try {
-      const capture = await runtimeRef.current.captureMap()
-      const board = await composeInterferenceBoard(capture, records, format)
-      downloadDataUrl(board, `prancha-interferencias-${new Date().toISOString().slice(0, 10)}.${format}`)
+      const capture = await runtimeRef.current.captureSummary()
+      if (format === 'png') { const board = await composeInterferenceBoard(capture, records, 'png'); downloadDataUrl(board, `prancha-interferencias-${new Date().toISOString().slice(0, 10)}.png`) }
+      else await exportConsolidatedPdf(capture, records)
     } catch (error) { setErrors([error instanceof Error ? error.message : 'Não foi possível gerar a prancha.']) }
     finally { setExportingBoard(false) }
   }
@@ -407,7 +439,7 @@ export default function Home() {
           <div className="flex items-center justify-between"><h2 className="text-xs font-bold uppercase tracking-[.2em] text-[#B8C9CC]">Camadas para consulta</h2><Layers3 size={16} className="text-[#F2B134]" /></div>
           <p className="mt-2 text-xs leading-5 text-[#8FA9AE]">A análise percorre automaticamente todas as camadas vetoriais do Web Map e lista somente as feições que intersectam, tocam, sobrepõem ou ficam circunscritas na área desenhada.</p>
           {!layers.length && <div className="mt-4 rounded border border-dashed border-[#55747B] p-4 text-xs text-[#B8C9CC]">Carregue o Web Map para listar as camadas vetoriais.</div>}
-          <div className="mt-4 space-y-4">
+          <div className="mt-4 rounded border border-[#F2B134]/60 bg-[#173C46] p-3"><div className="flex items-center justify-between"><label htmlFor="opacity" className="text-[11px] font-bold uppercase tracking-wider text-[#F4F0E8]">Transparência das camadas</label><span className="text-xs font-bold text-[#F2B134]">{Math.round((1 - layerOpacity) * 100)}%</span></div><input id="opacity" type="range" min="0.1" max="1" step="0.05" value={layerOpacity} onChange={(event) => changeOpacity(Number(event.target.value))} className="mt-2 w-full accent-[#F2B134]" /><p className="mt-1 text-[10px] text-[#B8C9CC]">Selecione uma camada abaixo para isolá-la no mapa.</p></div><div className="mt-4 space-y-4">
             {groupedLayers.map(([group, entries]) => <div key={group}>
               <p className="mb-2 text-[10px] font-bold uppercase tracking-[.18em] text-[#F2B134]">{group}</p>
               <div className="space-y-1.5">{entries.map((entry: InterferenceLayerInfo) => <button key={entry.id} type="button" onClick={() => selectLayer(selectedLayerId === entry.id ? null : entry.id)} className={`flex w-full cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-left text-xs transition ${selectedLayerId === entry.id ? 'bg-[#F2B134]/25 text-white ring-1 ring-[#F2B134]' : 'text-[#DCE7E8] hover:bg-white/5'}`}>
@@ -417,9 +449,9 @@ export default function Home() {
             </div>)}
           </div>
 
-          {layers.length > 0 && <section className="mt-5 rounded border border-[#31515A] bg-[#0B303A]/60 p-3"><div className="flex items-center justify-between"><label htmlFor="opacity" className="text-[11px] font-bold uppercase tracking-wider text-[#B8C9CC]">Transparência das camadas</label><span className="text-xs font-bold text-[#F2B134]">{Math.round((1 - layerOpacity) * 100)}%</span></div><input id="opacity" type="range" min="0.1" max="1" step="0.05" value={layerOpacity} onChange={(event) => changeOpacity(Number(event.target.value))} className="mt-2 w-full accent-[#F2B134]" /><p className="mt-1 text-[10px] text-[#8FA9AE]">Arraste para deixar o mapa-base mais visível.</p></section>}
 
-          {records.length > 0 && <section className="mt-6 border-t border-[#31515A] pt-4"><div className="flex items-center justify-between"><h2 className="text-xs font-bold uppercase tracking-[.2em] text-[#B8C9CC]">Interferências detectadas</h2><span className="rounded-full bg-[#F2B134] px-2 py-0.5 text-[10px] font-bold text-[#172B30]">{records.length}</span></div><p className="mt-2 text-[11px] text-[#8FA9AE]">Cada item é uma feição lógica consolidada; clique para destacar somente a ocorrência e exportar sua prancha.</p><div className="mt-3 grid grid-cols-2 gap-2"><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('png')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha PNG</Button><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('jpg')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha JPG</Button><Button size="sm" variant="outline" disabled={exportingSummary} onClick={exportSummary} className="col-span-2 border-[#F2B134] bg-[#F2B134]/10 text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={13} />{exportingSummary ? 'Gerando PDF…' : 'Relatório PDF paginado (camada/classe)'}</Button></div><div className="mt-3 space-y-2">{records.map((record) => <article key={record.id} className={`rounded border p-3 transition ${selectedId === record.id ? 'border-[#F2B134] bg-[#F2B134]/15' : 'border-[#31515A] bg-[#0B303A]/70'}`}><button className="w-full text-left" onClick={() => selectRecord(record)}><div className="flex items-start justify-between gap-2"><div><p className="text-xs font-bold text-[#F4F0E8]">{record.layerTitle}</p><p className="mt-1 text-[10px] uppercase tracking-wider text-[#F2B134]">{geometryLabel(record.geometryType)}</p></div><span className="text-[10px] text-[#8FA9AE]">{Object.keys(record.attributes).length} atributos</span></div><p className="mt-2 line-clamp-2 text-[11px] text-[#B8C9CC]">{Object.entries(record.attributes).slice(0, 2).map(([key, value]) => `${key}: ${String(value)}`).join(' · ')}</p></button><Button size="sm" variant="outline" className="mt-3 h-7 w-full border-[#55747B] bg-transparent text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]" disabled={exportingId === record.id} onClick={() => exportRecord(record)}>{exportingId === record.id ? <LoaderCircle className="mr-2 animate-spin" size={13} /> : <Download className="mr-2" size={13} />}Baixar prancha PNG</Button></article>)}</div></section>}
+
+          {records.length > 0 && <section className="mt-6 border-t border-[#31515A] pt-4"><div className="flex items-center justify-between"><h2 className="text-xs font-bold uppercase tracking-[.2em] text-[#B8C9CC]">Interferências detectadas</h2><span className="rounded-full bg-[#F2B134] px-2 py-0.5 text-[10px] font-bold text-[#172B30]">{records.length}</span></div><p className="mt-2 text-[11px] text-[#8FA9AE]">Selecione uma camada para isolar a visualização. O consolidado é exportado em PDF paginado.</p><div className="mt-3 grid gap-2"><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('jpg')} className="border-[#F2B134] bg-[#F2B134]/10 text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={13} />{exportingBoard ? 'Gerando prancha PDF…' : 'Prancha consolidada PDF paginada'}</Button><Button size="sm" variant="outline" disabled={exportingSummary} onClick={exportSummary} className="border-[#55747B] bg-transparent text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={13} />{exportingSummary ? 'Gerando PDF…' : 'Relatório quantitativo PDF (camada/classe)'}</Button></div><div className="mt-3 space-y-2">{records.map((record) => <article key={record.id} className={`rounded border p-3 transition ${selectedId === record.id ? 'border-[#F2B134] bg-[#F2B134]/15' : 'border-[#31515A] bg-[#0B303A]/70'}`}><button className="w-full text-left" onClick={() => selectRecord(record)}><div className="flex items-start justify-between gap-2"><div><p className="text-xs font-bold text-[#F4F0E8]">{record.layerTitle}</p><p className="mt-1 text-[10px] uppercase tracking-wider text-[#F2B134]">{geometryLabel(record.geometryType)} · {classValue(record)}</p></div><span className="text-[10px] text-[#8FA9AE]">{Object.keys(record.attributes).length} atributos</span></div><p className="mt-2 line-clamp-2 text-[11px] text-[#B8C9CC]">{Object.entries(record.attributes).slice(0, 2).map(([key, value]) => `${key}: ${String(value)}`).join(' · ')}</p></button><Button size="sm" variant="outline" className="mt-3 h-7 w-full border-[#55747B] bg-transparent text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]" disabled={exportingId === record.id} onClick={() => exportRecord(record)}>{exportingId === record.id ? <LoaderCircle className="mr-2 animate-spin" size={13} /> : <Download className="mr-2" size={13} />}Baixar prancha PNG</Button></article>)}</div></section>}
         </div>
 
         <footer className="space-y-2 border-t border-[#31515A] px-5 py-4"><div className="grid grid-cols-2 gap-2"><Button onClick={drawStudyArea} disabled={drawing || analyzing || !runtimeRef.current} className="bg-[#F2B134] text-[#172B30] hover:bg-[#FFD166]"><Play className="mr-2" size={15} />{drawing ? 'Desenhando…' : '1. Desenhar área'}</Button><Button onClick={analyzeStudyArea} disabled={analyzing || drawing || !studyAreaReady || !runtimeRef.current} className="bg-[#D98E2B] text-[#172B30] hover:bg-[#F2B134]"><Play className="mr-2" size={15} />{analyzing ? 'Analisando…' : '2. Analisar área'}</Button></div><Button onClick={clear} variant="outline" className="w-full border-[#55747B] bg-transparent text-[#F4F0E8] hover:bg-white/10"><Trash2 className="mr-2" size={15} />Limpar área e resultados</Button><Button onClick={() => setShowSettings((value) => !value)} variant="ghost" className="w-full justify-start text-[#B8C9CC] hover:bg-white/5 hover:text-white"><Settings2 className="mr-2" size={15} />Configuração do Portal e Web Map</Button></footer>
