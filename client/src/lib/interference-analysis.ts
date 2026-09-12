@@ -29,6 +29,13 @@ export interface InterferenceRecord {
   graphic: Graphic
   attributes: Record<string, unknown>
   symbol?: __esri.Symbol
+  involvedLayers?: Array<{ id: string; title: string; symbol?: __esri.Symbol; geometryType?: InterferenceGeometry }>
+}
+
+export interface CaptureResult {
+  dataUrl: string
+  extent?: { xmin: number; ymin: number; xmax: number; ymax: number }
+  spatialReference?: { wkid?: number; latestWkid?: number }
 }
 
 export interface InterferenceLayerInfo {
@@ -45,8 +52,8 @@ export interface InterferenceRuntime {
   drawStudyArea: () => Promise<Polygon | null>
   analyzeStudyArea: (studyArea: Polygon) => Promise<{ records: InterferenceRecord[]; errors: string[] }>
   highlightRecord: (record: InterferenceRecord) => Promise<void>
-  captureRecord: (record: InterferenceRecord) => Promise<string>
-  captureMap: () => Promise<string>
+  captureRecord: (record: InterferenceRecord) => Promise<CaptureResult>
+  captureMap: () => Promise<CaptureResult>
   clearAnalysis: () => void
   destroy: () => void
 }
@@ -163,6 +170,7 @@ export async function createInterferenceRuntime(
     labelLayer.removeAll()
     const records: InterferenceRecord[] = []
     const errors: string[] = []
+    const byLogicalFeature = new Map<string, InterferenceRecord>()
 
     for (const entry of layers) {
       try {
@@ -191,17 +199,33 @@ export async function createInterferenceRuntime(
                 : 'interseção'
           const sourceSymbol = (entry.layer.renderer as any)?.getSymbol?.(graphic) ?? symbolFor(entry.geometryType!)
           const clippedGraphic = new Graphic({ geometry: clippedGeometry, attributes: graphic.attributes, symbol: sourceSymbol })
+          const objectId = graphic.attributes?.[entry.layer.objectIdField]
+          // Uma mesma feição pode retornar mais de um fragmento (multipart/dissolve).
+          // A unidade selecionável deve ser a feição lógica, não cada fragmento.
+          const logicalKey = `${entry.id}:${objectId ?? JSON.stringify(displayAttributes(graphic))}`
+          const existing = byLogicalFeature.get(logicalKey)
+          if (existing) {
+            const merged = geometryEngine.union([existing.graphic.geometry!, clippedGeometry])
+            if (merged) {
+              existing.graphic.geometry = merged as __esri.Geometry
+              const previousRelation = String(existing.attributes._relacao_espacial || '')
+              existing.attributes._relacao_espacial = previousRelation === relation ? relation : 'interseção'
+            }
+            return
+          }
           const record: InterferenceRecord = {
-            id: `${entry.id}-${graphic.attributes?.[entry.layer.objectIdField] ?? index}`,
+            id: `${entry.id}-${objectId ?? index}`,
             layerTitle: entry.title,
             layerId: entry.id,
             geometryType: entry.geometryType!,
             graphic: clippedGraphic,
             symbol: sourceSymbol,
-            attributes: { ...displayAttributes(graphic), _relacao_espacial: relation },
+            involvedLayers: [{ id: entry.id, title: entry.title, symbol: sourceSymbol, geometryType: entry.geometryType }],
+            attributes: { ...displayAttributes(graphic), _relacao_espacial: relation, _feicao_logica: objectId ?? 'sem OBJECTID' },
           }
+          byLogicalFeature.set(logicalKey, record)
           records.push(record)
-          resultLayer.add(new Graphic({ geometry: clippedGeometry, symbol: sourceSymbol, attributes: { interferenceId: record.id, layerTitle: entry.title } }))
+          resultLayer.add(new Graphic({ geometry: clippedGeometry, symbol: sourceSymbol, attributes: { interferenceId: record.id, layerTitle: entry.title, logicalKey } }))
         })
       } catch (error) {
         errors.push(`${entry.title}: ${error instanceof Error ? error.message : 'não foi possível consultar a camada'}`)
@@ -231,14 +255,34 @@ export async function createInterferenceRuntime(
   }
 
   const captureRecord = async (record: InterferenceRecord) => {
-    await highlightRecord(record)
-    const screenshot = await view.takeScreenshot({ format: 'png', quality: 95 })
-    return screenshot.dataUrl
+    const featureLayers = layers.map((entry) => ({ layer: entry.layer, visible: entry.layer.visible, opacity: entry.layer.opacity }))
+    const resultGraphics = resultLayer.graphics.toArray().map((graphic) => ({ graphic, visible: graphic.visible }))
+    try {
+      // A prancha individual mostra apenas a camada que participa da ocorrência.
+      featureLayers.forEach(({ layer }) => { layer.visible = layer.id === record.layerId })
+      resultGraphics.forEach(({ graphic }) => { graphic.visible = graphic.attributes?.interferenceId === record.id })
+      await highlightRecord(record)
+      const screenshot = await view.takeScreenshot({ format: 'png', quality: 95 })
+      const extent = view.extent
+      return {
+        dataUrl: screenshot.dataUrl,
+        extent: extent ? { xmin: extent.xmin, ymin: extent.ymin, xmax: extent.xmax, ymax: extent.ymax } : undefined,
+        spatialReference: extent?.spatialReference ? { wkid: extent.spatialReference.wkid ?? undefined, latestWkid: (extent.spatialReference as any).latestWkid ?? undefined } : undefined,
+      }
+    } finally {
+      featureLayers.forEach(({ layer, visible, opacity }) => { layer.visible = visible; layer.opacity = opacity })
+      resultGraphics.forEach(({ graphic, visible }) => { graphic.visible = visible })
+    }
   }
 
   const captureMap = async () => {
     const screenshot = await view.takeScreenshot({ format: 'png', quality: 95 })
-    return screenshot.dataUrl
+    const extent = view.extent
+    return {
+      dataUrl: screenshot.dataUrl,
+      extent: extent ? { xmin: extent.xmin, ymin: extent.ymin, xmax: extent.xmax, ymax: extent.ymax } : undefined,
+      spatialReference: extent?.spatialReference ? { wkid: extent.spatialReference.wkid ?? undefined, latestWkid: (extent.spatialReference as any).latestWkid ?? undefined } : undefined,
+    }
   }
 
   return {

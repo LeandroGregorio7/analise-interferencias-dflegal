@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import {
   InterferenceLayerInfo,
   InterferenceRecord,
+  CaptureResult,
   createInterferenceRuntime,
   portalRoot,
 } from '@/lib/interference-analysis'
@@ -48,7 +49,8 @@ const loadImage = (dataUrl: string) => new Promise<HTMLImageElement>((resolve, r
   image.src = dataUrl
 })
 
-const composeInterferenceBoard = async (mapDataUrl: string, records: InterferenceRecord[], format: 'png' | 'jpg') => {
+const composeInterferenceBoard = async (capture: CaptureResult, records: InterferenceRecord[], format: 'png' | 'jpg') => {
+  const mapDataUrl = capture.dataUrl
   const image = await loadImage(mapDataUrl)
   const canvas = document.createElement('canvas')
   canvas.width = 2000
@@ -65,6 +67,27 @@ const composeInterferenceBoard = async (mapDataUrl: string, records: Interferenc
   const ratio = Math.min(mapW / image.width, mapH / image.height)
   const drawW = image.width * ratio; const drawH = image.height * ratio
   context.drawImage(image, mapX, mapY, drawW, drawH)
+  // Grade de coordenadas da extensão capturada, sem depender da legenda do mapa-base.
+  if (capture.extent) {
+    const { xmin, ymin, xmax, ymax } = capture.extent
+    const gridCount = 6
+    context.save()
+    context.strokeStyle = 'rgba(23,60,70,.34)'
+    context.fillStyle = 'rgba(23,60,70,.82)'
+    context.lineWidth = 1
+    context.font = '10px Arial'
+    for (let i = 0; i <= gridCount; i += 1) {
+      const px = mapX + (drawW * i) / gridCount
+      const py = mapY + (drawH * i) / gridCount
+      context.beginPath(); context.moveTo(px, mapY); context.lineTo(px, mapY + drawH); context.stroke()
+      context.beginPath(); context.moveTo(mapX, py); context.lineTo(mapX + drawW, py); context.stroke()
+      const xValue = xmin + ((xmax - xmin) * i) / gridCount
+      const yValue = ymax - ((ymax - ymin) * i) / gridCount
+      context.fillText(xValue.toFixed(0), px - 18, mapY + drawH + 15)
+      context.fillText(yValue.toFixed(0), mapX - 48, py + 3)
+    }
+    context.restore()
+  }
   context.strokeStyle = '#263D42'; context.lineWidth = 3; context.strokeRect(mapX, mapY, drawW, drawH)
   const panelX = 1320; const panelW = 610
   context.fillStyle = '#FFFFFF'; context.fillRect(panelX, 166, panelW, 960)
@@ -83,8 +106,15 @@ const composeInterferenceBoard = async (mapDataUrl: string, records: Interferenc
     y += 116
   })
   if (records.length > 18) { context.fillStyle = '#B93835'; context.font = '700 12px Arial'; context.fillText(`+ ${records.length - 18} interferência(s) no resultado completo`, panelX + 34, 1085) }
-  const legendEntries = Array.from(new Map(records.map((record) => [record.layerId, record])).values())
-  context.fillStyle = '#173C46'; context.font = '700 13px Arial'; context.fillText('LEGENDA DAS INTERFERÊNCIAS', 62, 1150)
+  const legendEntries = Array.from(
+    new Map(
+      records.flatMap((record) =>
+        (record.involvedLayers || [{ id: record.layerId, title: record.layerTitle, symbol: record.symbol, geometryType: record.geometryType }])
+          .map((entry) => [entry.id, { ...record, ...entry }] as const),
+      ),
+    ).values(),
+  )
+  context.fillStyle = '#173C46'; context.font = '700 13px Arial'; context.fillText('LEGENDA DAS CAMADAS PARTICIPANTES', 62, 1150)
   let legendX = 62
   legendEntries.slice(0, 5).forEach((record) => {
     const swatch = symbolColor(record.symbol, record.geometryType === 'point' ? '#168AAD' : record.geometryType === 'polyline' ? '#F2B134' : '#E63946')
@@ -185,8 +215,8 @@ export default function Home() {
     if (!runtimeRef.current) return
     setExportingId(record.id)
     try {
-      const mapDataUrl = await runtimeRef.current.captureRecord(record)
-      const board = await composeInterferenceBoard(mapDataUrl, [record], 'png')
+      const capture = await runtimeRef.current.captureRecord(record)
+      const board = await composeInterferenceBoard(capture, [record], 'png')
       downloadDataUrl(board, `interferencia-${slug(record.layerTitle)}-${slug(record.id)}.png`)
     } catch (error) {
       setErrors([error instanceof Error ? error.message : 'Não foi possível gerar o PNG desta interferência.'])
@@ -197,8 +227,8 @@ export default function Home() {
     if (!runtimeRef.current || !records.length) return
     setExportingBoard(true)
     try {
-      const mapDataUrl = await runtimeRef.current.captureMap()
-      const board = await composeInterferenceBoard(mapDataUrl, records, format)
+      const capture = await runtimeRef.current.captureMap()
+      const board = await composeInterferenceBoard(capture, records, format)
       downloadDataUrl(board, `prancha-interferencias-${new Date().toISOString().slice(0, 10)}.${format}`)
     } catch (error) { setErrors([error instanceof Error ? error.message : 'Não foi possível gerar a prancha.']) }
     finally { setExportingBoard(false) }
@@ -249,7 +279,7 @@ export default function Home() {
             </div>)}
           </div>
 
-          {records.length > 0 && <section className="mt-6 border-t border-[#31515A] pt-4"><div className="flex items-center justify-between"><h2 className="text-xs font-bold uppercase tracking-[.2em] text-[#B8C9CC]">Interferências detectadas</h2><span className="rounded-full bg-[#F2B134] px-2 py-0.5 text-[10px] font-bold text-[#172B30]">{records.length}</span></div><p className="mt-2 text-[11px] text-[#8FA9AE]">Clique em um resultado para destacar no mapa e exportar sua prancha individual.</p><div className="mt-3 grid grid-cols-2 gap-2"><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('png')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha PNG</Button><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('jpg')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha JPG</Button></div><div className="mt-3 space-y-2">{records.map((record) => <article key={record.id} className={`rounded border p-3 transition ${selectedId === record.id ? 'border-[#F2B134] bg-[#F2B134]/15' : 'border-[#31515A] bg-[#0B303A]/70'}`}><button className="w-full text-left" onClick={() => selectRecord(record)}><div className="flex items-start justify-between gap-2"><div><p className="text-xs font-bold text-[#F4F0E8]">{record.layerTitle}</p><p className="mt-1 text-[10px] uppercase tracking-wider text-[#F2B134]">{geometryLabel(record.geometryType)}</p></div><span className="text-[10px] text-[#8FA9AE]">{Object.keys(record.attributes).length} atributos</span></div><p className="mt-2 line-clamp-2 text-[11px] text-[#B8C9CC]">{Object.entries(record.attributes).slice(0, 2).map(([key, value]) => `${key}: ${String(value)}`).join(' · ')}</p></button><Button size="sm" variant="outline" className="mt-3 h-7 w-full border-[#55747B] bg-transparent text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]" disabled={exportingId === record.id} onClick={() => exportRecord(record)}>{exportingId === record.id ? <LoaderCircle className="mr-2 animate-spin" size={13} /> : <Download className="mr-2" size={13} />}Baixar prancha PNG</Button></article>)}</div></section>}
+          {records.length > 0 && <section className="mt-6 border-t border-[#31515A] pt-4"><div className="flex items-center justify-between"><h2 className="text-xs font-bold uppercase tracking-[.2em] text-[#B8C9CC]">Interferências detectadas</h2><span className="rounded-full bg-[#F2B134] px-2 py-0.5 text-[10px] font-bold text-[#172B30]">{records.length}</span></div><p className="mt-2 text-[11px] text-[#8FA9AE]">Cada item é uma feição lógica consolidada; clique para destacar somente a ocorrência e exportar sua prancha.</p><div className="mt-3 grid grid-cols-2 gap-2"><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('png')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha PNG</Button><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('jpg')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha JPG</Button></div><div className="mt-3 space-y-2">{records.map((record) => <article key={record.id} className={`rounded border p-3 transition ${selectedId === record.id ? 'border-[#F2B134] bg-[#F2B134]/15' : 'border-[#31515A] bg-[#0B303A]/70'}`}><button className="w-full text-left" onClick={() => selectRecord(record)}><div className="flex items-start justify-between gap-2"><div><p className="text-xs font-bold text-[#F4F0E8]">{record.layerTitle}</p><p className="mt-1 text-[10px] uppercase tracking-wider text-[#F2B134]">{geometryLabel(record.geometryType)}</p></div><span className="text-[10px] text-[#8FA9AE]">{Object.keys(record.attributes).length} atributos</span></div><p className="mt-2 line-clamp-2 text-[11px] text-[#B8C9CC]">{Object.entries(record.attributes).slice(0, 2).map(([key, value]) => `${key}: ${String(value)}`).join(' · ')}</p></button><Button size="sm" variant="outline" className="mt-3 h-7 w-full border-[#55747B] bg-transparent text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]" disabled={exportingId === record.id} onClick={() => exportRecord(record)}>{exportingId === record.id ? <LoaderCircle className="mr-2 animate-spin" size={13} /> : <Download className="mr-2" size={13} />}Baixar prancha PNG</Button></article>)}</div></section>}
         </div>
 
         <footer className="space-y-2 border-t border-[#31515A] px-5 py-4"><div className="grid grid-cols-2 gap-2"><Button onClick={drawStudyArea} disabled={drawing || analyzing || !runtimeRef.current} className="bg-[#F2B134] text-[#172B30] hover:bg-[#FFD166]"><Play className="mr-2" size={15} />{drawing ? 'Desenhando…' : '1. Desenhar área'}</Button><Button onClick={analyzeStudyArea} disabled={analyzing || drawing || !studyAreaReady || !runtimeRef.current} className="bg-[#D98E2B] text-[#172B30] hover:bg-[#F2B134]"><Play className="mr-2" size={15} />{analyzing ? 'Analisando…' : '2. Analisar área'}</Button></div><Button onClick={clear} variant="outline" className="w-full border-[#55747B] bg-transparent text-[#F4F0E8] hover:bg-white/10"><Trash2 className="mr-2" size={15} />Limpar área e resultados</Button><Button onClick={() => setShowSettings((value) => !value)} variant="ghost" className="w-full justify-start text-[#B8C9CC] hover:bg-white/5 hover:text-white"><Settings2 className="mr-2" size={15} />Configuração do Portal e Web Map</Button></footer>
