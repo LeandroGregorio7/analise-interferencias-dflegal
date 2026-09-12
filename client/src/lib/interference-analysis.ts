@@ -193,6 +193,14 @@ export async function createInterferenceRuntime(
             ? rawIntersection.length === 1 ? rawIntersection[0] : geometryEngine.union(rawIntersection)
             : rawIntersection
           if (!clippedGeometry) return
+          // Interferência somente existe quando há parte efetiva da feição
+          // dentro da área. Um simples toque no limite não é ocorrência.
+          const meaningful = entry.geometryType === 'polygon'
+            ? clippedGeometry.type === 'polygon' && geometryEngine.geodesicArea(clippedGeometry as __esri.Polygon, 'square-meters') > 0.01
+            : entry.geometryType === 'polyline'
+              ? clippedGeometry.type === 'polyline' && geometryEngine.geodesicLength(clippedGeometry as __esri.Polyline, 'meters') > 0.01
+              : clippedGeometry.type === 'point' && geometryEngine.contains(studyArea, graphic.geometry)
+          if (!meaningful) return
           const relation = geometryEngine.contains(studyArea, graphic.geometry)
             ? 'circunscrita'
             : geometryEngine.touches(studyArea, graphic.geometry)
@@ -217,7 +225,7 @@ export async function createInterferenceRuntime(
               resultLayer.graphics.toArray()
                 .filter((item) => item.attributes?.interferenceId === existing.id)
                 .forEach((item) => resultLayer.remove(item))
-              resultLayer.add(new Graphic({ geometry: merged as __esri.Geometry, symbol: existing.symbol as any, attributes: { interferenceId: existing.id, layerTitle: existing.layerTitle, logicalKey } }))
+              resultLayer.add(new Graphic({ geometry: merged as __esri.Geometry, symbol: existing.symbol as any, attributes: { interferenceId: existing.id, layerId: existing.layerId, layerTitle: existing.layerTitle, logicalKey } }))
             }
             return
           }
@@ -233,7 +241,7 @@ export async function createInterferenceRuntime(
           }
           byLogicalFeature.set(logicalKey, record)
           records.push(record)
-          resultLayer.add(new Graphic({ geometry: clippedGeometry, symbol: sourceSymbol, attributes: { interferenceId: record.id, layerTitle: entry.title, logicalKey } }))
+          resultLayer.add(new Graphic({ geometry: clippedGeometry, symbol: sourceSymbol, attributes: { interferenceId: record.id, layerId: entry.id, layerTitle: entry.title, logicalKey } }))
         })
       } catch (error) {
         errors.push(`${entry.title}: ${error instanceof Error ? error.message : 'não foi possível consultar a camada'}`)
