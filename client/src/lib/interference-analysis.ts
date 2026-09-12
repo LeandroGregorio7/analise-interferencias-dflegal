@@ -28,6 +28,7 @@ export interface InterferenceRecord {
   geometryType: InterferenceGeometry
   graphic: Graphic
   attributes: Record<string, unknown>
+  symbol?: __esri.Symbol
 }
 
 export interface InterferenceLayerInfo {
@@ -174,17 +175,33 @@ export async function createInterferenceRuntime(
         const response = await entry.layer.queryFeatures(query)
         response.features.forEach((graphic, index) => {
           if (!graphic.geometry) return
-          const relation = geometryEngine.contains(studyArea, graphic.geometry) ? 'circunscrita' : geometryEngine.touches(studyArea, graphic.geometry) ? 'toca' : geometryEngine.overlaps(studyArea, graphic.geometry) ? 'sobreposição' : 'interseção'
+          const intersects = geometryEngine.intersects(studyArea, graphic.geometry)
+          if (!intersects) return
+          const rawIntersection = geometryEngine.intersect(studyArea, graphic.geometry)
+          const clippedGeometry = Array.isArray(rawIntersection)
+            ? rawIntersection.length === 1 ? rawIntersection[0] : geometryEngine.union(rawIntersection)
+            : rawIntersection
+          if (!clippedGeometry) return
+          const relation = geometryEngine.contains(studyArea, graphic.geometry)
+            ? 'circunscrita'
+            : geometryEngine.touches(studyArea, graphic.geometry)
+              ? 'toca'
+              : geometryEngine.overlaps(studyArea, graphic.geometry)
+                ? 'sobreposição'
+                : 'interseção'
+          const sourceSymbol = (entry.layer.renderer as any)?.getSymbol?.(graphic) ?? symbolFor(entry.geometryType!)
+          const clippedGraphic = new Graphic({ geometry: clippedGeometry, attributes: graphic.attributes, symbol: sourceSymbol })
           const record: InterferenceRecord = {
             id: `${entry.id}-${graphic.attributes?.[entry.layer.objectIdField] ?? index}`,
             layerTitle: entry.title,
             layerId: entry.id,
             geometryType: entry.geometryType!,
-            graphic,
+            graphic: clippedGraphic,
+            symbol: sourceSymbol,
             attributes: { ...displayAttributes(graphic), _relacao_espacial: relation },
           }
           records.push(record)
-          resultLayer.add(new Graphic({ geometry: graphic.geometry, symbol: symbolFor(entry.geometryType!), attributes: { interferenceId: record.id } }))
+          resultLayer.add(new Graphic({ geometry: clippedGeometry, symbol: sourceSymbol, attributes: { interferenceId: record.id, layerTitle: entry.title } }))
         })
       } catch (error) {
         errors.push(`${entry.title}: ${error instanceof Error ? error.message : 'não foi possível consultar a camada'}`)

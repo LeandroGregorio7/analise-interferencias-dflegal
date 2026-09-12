@@ -31,6 +31,15 @@ const downloadDataUrl = (dataUrl: string, filename: string) => {
   link.remove()
 }
 const geometryLabel = (type?: string) => type === 'point' ? 'Ponto' : type === 'polyline' ? 'Linha' : 'Polígono'
+const symbolColor = (symbol?: __esri.Symbol, fallback = '#E63946') => {
+  const color = (symbol as any)?.color
+  if (color?.toRgba) {
+    const [r, g, b, a] = color.toRgba()
+    return `rgba(${r},${g},${b},${a ?? 1})`
+  }
+  if (Array.isArray(color)) return `rgba(${color[0]},${color[1]},${color[2]},${(color[3] ?? 255) / 255})`
+  return fallback
+}
 
 const loadImage = (dataUrl: string) => new Promise<HTMLImageElement>((resolve, reject) => {
   const image = new Image()
@@ -66,7 +75,7 @@ const composeInterferenceBoard = async (mapDataUrl: string, records: Interferenc
     if (y > 1060) return
     context.fillStyle = index % 2 ? '#F5F8F7' : '#EAF0EE'; context.fillRect(panelX + 20, y - 24, panelW - 40, 104)
     context.fillStyle = '#173C46'; context.font = '700 14px Arial'; context.fillText(`${index + 1}. ${record.layerTitle}`, panelX + 34, y)
-    context.fillStyle = '#B06D1D'; context.font = '700 12px Arial'; context.fillText(geometryLabel(record.geometryType), panelX + 34, y + 21)
+    context.fillStyle = '#B06D1D'; context.font = '700 12px Arial'; context.fillText(`${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')}`, panelX + 34, y + 21)
     context.fillStyle = '#526166'; context.font = '11px Arial'
     const attrs = Object.entries(record.attributes).slice(0, 3).map(([key, value]) => `${key}: ${String(value)}`).join(' · ')
     context.fillText(attrs.slice(0, 78), panelX + 34, y + 43)
@@ -74,7 +83,16 @@ const composeInterferenceBoard = async (mapDataUrl: string, records: Interferenc
     y += 116
   })
   if (records.length > 18) { context.fillStyle = '#B93835'; context.font = '700 12px Arial'; context.fillText(`+ ${records.length - 18} interferência(s) no resultado completo`, panelX + 34, 1085) }
-  context.fillStyle = '#526166'; context.font = '11px Arial'; context.fillText('Legenda: ponto = azul · linha = ocre · polígono = vermelho · destaque = amarelo', 62, 1150)
+  const legendEntries = Array.from(new Map(records.map((record) => [record.layerId, record])).values())
+  context.fillStyle = '#173C46'; context.font = '700 13px Arial'; context.fillText('LEGENDA DAS INTERFERÊNCIAS', 62, 1150)
+  let legendX = 62
+  legendEntries.slice(0, 5).forEach((record) => {
+    const swatch = symbolColor(record.symbol, record.geometryType === 'point' ? '#168AAD' : record.geometryType === 'polyline' ? '#F2B134' : '#E63946')
+    context.fillStyle = swatch; context.fillRect(legendX, 1162, 18, 12)
+    context.strokeStyle = '#526166'; context.lineWidth = 1; context.strokeRect(legendX, 1162, 18, 12)
+    context.fillStyle = '#526166'; context.font = '11px Arial'; context.fillText(record.layerTitle.slice(0, 30), legendX + 25, 1172)
+    legendX += Math.min(350, 45 + record.layerTitle.length * 7)
+  })
   return format === 'jpg' ? canvas.toDataURL('image/jpeg', 0.92) : canvas.toDataURL('image/png')
 }
 
