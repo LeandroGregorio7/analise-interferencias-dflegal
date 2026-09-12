@@ -45,6 +45,7 @@ export interface InterferenceRuntime {
   analyzeStudyArea: (studyArea: Polygon, activeLayerIds: string[]) => Promise<{ records: InterferenceRecord[]; errors: string[] }>
   highlightRecord: (record: InterferenceRecord) => Promise<void>
   captureRecord: (record: InterferenceRecord) => Promise<string>
+  captureMap: () => Promise<string>
   clearAnalysis: () => void
   destroy: () => void
 }
@@ -218,6 +219,11 @@ export async function createInterferenceRuntime(
     return screenshot.dataUrl
   }
 
+  const captureMap = async () => {
+    const screenshot = await view.takeScreenshot({ format: 'png', quality: 95 })
+    return screenshot.dataUrl
+  }
+
   return {
     view,
     layers,
@@ -225,6 +231,7 @@ export async function createInterferenceRuntime(
     analyzeStudyArea,
     highlightRecord,
     captureRecord,
+    captureMap,
     clearAnalysis: () => { studyLayer.removeAll(); resultLayer.removeAll(); labelLayer.removeAll() },
     destroy: () => { sketch.destroy(); view.destroy() },
   }
