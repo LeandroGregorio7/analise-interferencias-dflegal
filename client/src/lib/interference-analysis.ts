@@ -52,6 +52,7 @@ export interface InterferenceRuntime {
   drawStudyArea: () => Promise<Polygon | null>
   analyzeStudyArea: (studyArea: Polygon) => Promise<{ records: InterferenceRecord[]; errors: string[] }>
   highlightRecord: (record: InterferenceRecord) => Promise<void>
+  isolateRecord: (record: InterferenceRecord) => Promise<void>
   captureRecord: (record: InterferenceRecord) => Promise<CaptureResult>
   captureMap: () => Promise<CaptureResult>
   captureSummary: () => Promise<CaptureResult>
@@ -270,6 +271,22 @@ export async function createInterferenceRuntime(
     }
   }
 
+  const isolateRecord = async (record: InterferenceRecord) => {
+    // Selecionar no dropdown significa isolar: oculta camadas originais,
+    // outras ocorrências e deixa somente o recorte escolhido no mapa.
+    layers.forEach((entry) => { entry.layer.visible = false })
+    resultLayer.graphics.forEach((graphic) => { graphic.visible = graphic.attributes?.interferenceId === record.id })
+    labelLayer.removeAll()
+    const geometry = record.graphic.geometry
+    if (geometry) {
+      labelLayer.add(new Graphic({
+        geometry: geometry.type === 'point' ? geometry : geometry.extent?.center,
+        symbol: new TextSymbol({ text: record.layerTitle, color: '#1D3557', haloColor: '#FFFFFF', haloSize: 2, font: { size: 10, weight: 'bold' } }),
+      }))
+      await view.goTo(geometry, { duration: 450 })
+    }
+  }
+
   const captureIsolated = async (record?: InterferenceRecord) => {
     const featureLayers = layers.map((entry) => ({ layer: entry.layer, visible: entry.layer.visible, opacity: entry.layer.opacity }))
     const resultGraphics = resultLayer.graphics.toArray().map((graphic) => ({ graphic, visible: graphic.visible }))
@@ -325,6 +342,7 @@ export async function createInterferenceRuntime(
     drawStudyArea,
     analyzeStudyArea,
     highlightRecord,
+    isolateRecord,
     captureRecord,
     captureMap,
     captureSummary,
