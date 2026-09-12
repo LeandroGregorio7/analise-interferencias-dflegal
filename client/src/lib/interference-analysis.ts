@@ -55,6 +55,8 @@ export interface InterferenceRuntime {
   captureRecord: (record: InterferenceRecord) => Promise<CaptureResult>
   captureMap: () => Promise<CaptureResult>
   captureSummary: () => Promise<CaptureResult>
+  setLayerSelection: (layerId: string | null) => void
+  setLayerOpacity: (opacity: number) => void
   clearAnalysis: () => void
   destroy: () => void
 }
@@ -297,6 +299,12 @@ export async function createInterferenceRuntime(
   }
   const captureSummary = async () => captureIsolated()
   const captureMap = async () => captureSummary()
+  const setLayerSelection = (layerId: string | null) => {
+    layers.forEach((entry) => { entry.layer.visible = layerId === null ? entry.visible : entry.id === layerId })
+  }
+  const setLayerOpacity = (opacity: number) => {
+    layers.forEach((entry) => { entry.layer.opacity = Math.max(0.1, Math.min(1, opacity)) })
+  }
 
   return {
     view,
@@ -307,6 +315,8 @@ export async function createInterferenceRuntime(
     captureRecord,
     captureMap,
     captureSummary,
+    setLayerSelection,
+    setLayerOpacity,
     clearAnalysis: () => { studyLayer.removeAll(); resultLayer.removeAll(); labelLayer.removeAll() },
     destroy: () => { sketch.destroy(); view.destroy() },
   }

@@ -4,6 +4,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Polygon from '@arcgis/core/geometry/Polygon'
+import { jsPDF } from 'jspdf'
 import { AlertTriangle, Download, Layers3, LoaderCircle, MapPinned, Play, Settings2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -194,6 +195,52 @@ const composeSummaryInfographic = async (capture: CaptureResult, records: Interf
   return canvas.toDataURL('image/png')
 }
 
+const classValue = (record: InterferenceRecord) => {
+  const preferred = ['dsc_macrozone', 'dsc_macrozona', 'dsc_zona', 'nom_nome', 'nome', 'classe', 'classificacao', 'category', 'tipo']
+  const entries = Object.entries(record.attributes).filter(([key, value]) => value !== null && value !== undefined && String(value).trim() && !key.startsWith('_'))
+  const found = preferred.map((key) => entries.find(([name]) => name.toLowerCase() === key)).find(Boolean)
+  return String(found?.[1] ?? entries.find(([key]) => !['objectid', 'id', 'fid'].includes(key.toLowerCase()))?.[1] ?? 'Classe não informada')
+}
+
+const exportSummaryPdf = (records: InterferenceRecord[]) => {
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+  const pageWidth = 210; const margin = 16; const groups = new Map<string, Map<string, number>>()
+  records.forEach((record) => {
+    const layer = groups.get(record.layerTitle) || new Map<string, number>()
+    const klass = classValue(record); layer.set(klass, (layer.get(klass) || 0) + 1); groups.set(record.layerTitle, layer)
+  })
+  let page = 0
+  const header = (title: string) => {
+    if (page > 0) pdf.addPage()
+    page += 1
+    pdf.setFillColor(11, 48, 58); pdf.rect(0, 0, pageWidth, 28, 'F')
+    pdf.setTextColor(242, 177, 52); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(16); pdf.text('DF LEGAL · ANÁLISE DE INTERFERÊNCIAS', margin, 12)
+    pdf.setTextColor(255, 255, 255); pdf.setFontSize(11); pdf.text(title, margin, 21)
+    pdf.setTextColor(23, 60, 70); pdf.setFontSize(9); pdf.text(`Página ${page}`, pageWidth - margin - 18, 21)
+  }
+  header('Relatório consolidado por camada e classe')
+  pdf.setTextColor(23, 60, 70); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10)
+  pdf.text(`Total de interferências consolidadas: ${records.length}`, margin, 42)
+  pdf.text(`Camadas participantes: ${groups.size}`, margin, 49)
+  let y = 62
+  const drawTableHeader = () => { pdf.setFillColor(23, 60, 70); pdf.rect(margin, y, pageWidth - margin * 2, 9, 'F'); pdf.setTextColor(255, 255, 255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9); pdf.text('CAMADA', margin + 3, y + 6); pdf.text('CLASSE / NOME DA INTERFERÊNCIA', margin + 76, y + 6); pdf.text('QTD.', pageWidth - margin - 18, y + 6); y += 9 }
+  drawTableHeader()
+  for (const [layerTitle, classes] of Array.from(groups.entries())) {
+    for (const [klass, count] of Array.from(classes.entries())) {
+      if (y > 275) { header('Relatório consolidado — continuação'); y = 42; drawTableHeader() }
+      pdf.setFillColor((y / 9) % 2 ? 245 : 234, 248, 247); pdf.rect(margin, y, pageWidth - margin * 2, 12, 'F')
+      pdf.setTextColor(23, 60, 70); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.text(layerTitle.slice(0, 34), margin + 3, y + 8)
+      pdf.setFont('helvetica', 'normal'); pdf.text(klass.slice(0, 52), margin + 76, y + 8); pdf.text(String(count), pageWidth - margin - 15, y + 8); y += 12
+    }
+  }
+  header('Critérios do consolidado')
+  pdf.setTextColor(23, 60, 70); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10)
+  pdf.text('Cada registro representa uma feição lógica consolidada e recortada pela área de estudo.', margin, 44)
+  pdf.text('A quantidade é agrupada por camada do Web Map e pelo atributo de classe/nome disponível.', margin, 52)
+  pdf.text('A seleção de camada no aplicativo controla a visualização e a exportação individual.', margin, 60)
+  pdf.save(`relatorio-interferencias-${new Date().toISOString().slice(0,10)}.pdf`)
+}
+
 export default function Home() {
   const mapRef = useRef<HTMLDivElement>(null)
   const runtimeRef = useRef<Awaited<ReturnType<typeof createInterferenceRuntime>> | null>(null)
@@ -215,6 +262,8 @@ export default function Home() {
   const [exportingId, setExportingId] = useState<string | null>(null)
   const [exportingBoard, setExportingBoard] = useState(false)
   const [exportingSummary, setExportingSummary] = useState(false)
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null)
+  const [layerOpacity, setLayerOpacity] = useState(0.55)
 
   const groupedLayers = useMemo(() => {
     const groups = new Map<string, InterferenceLayerInfo[]>()
@@ -236,6 +285,7 @@ export default function Home() {
       runtimeRef.current = runtime
       setLayers(runtime.layers)
       setActiveLayerIds(runtime.layers.filter((entry) => entry.visible).map((entry) => entry.id))
+      runtime.setLayerOpacity(0.55)
       setShowSettings(false)
       setStatus(`Web Map carregado. ${runtime.layers.length} camadas vetoriais disponíveis para análise.`)
     } catch (error) {
@@ -306,12 +356,20 @@ export default function Home() {
   const exportSummary = async () => {
     if (!runtimeRef.current || !records.length) return
     setExportingSummary(true)
-    try {
-      const capture = await runtimeRef.current.captureSummary()
-      const board = await composeSummaryInfographic(capture, records)
-      downloadDataUrl(board, `quadro-resumo-interferencias-${new Date().toISOString().slice(0, 10)}.png`)
-    } catch (error) { setErrors([error instanceof Error ? error.message : 'Não foi possível gerar o quadro-resumo.']) }
+    try { exportSummaryPdf(records) }
+    catch (error) { setErrors([error instanceof Error ? error.message : 'Não foi possível gerar o relatório PDF.']) }
     finally { setExportingSummary(false) }
+  }
+
+  const selectLayer = (layerId: string | null) => {
+    setSelectedLayerId(layerId)
+    runtimeRef.current?.setLayerSelection(layerId)
+    setActiveLayerIds(layerId ? [layerId] : layers.map((layer) => layer.id))
+  }
+
+  const changeOpacity = (value: number) => {
+    setLayerOpacity(value)
+    runtimeRef.current?.setLayerOpacity(value)
   }
 
   const clear = () => {
@@ -352,14 +410,16 @@ export default function Home() {
           <div className="mt-4 space-y-4">
             {groupedLayers.map(([group, entries]) => <div key={group}>
               <p className="mb-2 text-[10px] font-bold uppercase tracking-[.18em] text-[#F2B134]">{group}</p>
-              <div className="space-y-1.5">{entries.map((entry: InterferenceLayerInfo) => <label key={entry.id} className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-xs text-[#DCE7E8] transition hover:bg-white/5">
-                <span className="mt-0.5 h-3 w-3 rounded-full border border-[#F2B134] bg-[#F2B134]/70" />
-                <span className="min-w-0"><span className="block truncate">{entry.title}</span><span className="text-[10px] text-[#8FA9AE]">{geometryLabel(entry.geometryType)}</span></span>
-              </label>)}</div>
+              <div className="space-y-1.5">{entries.map((entry: InterferenceLayerInfo) => <button key={entry.id} type="button" onClick={() => selectLayer(selectedLayerId === entry.id ? null : entry.id)} className={`flex w-full cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-left text-xs transition ${selectedLayerId === entry.id ? 'bg-[#F2B134]/25 text-white ring-1 ring-[#F2B134]' : 'text-[#DCE7E8] hover:bg-white/5'}`}>
+                <span className={`mt-0.5 h-3 w-3 shrink-0 rounded-full border border-[#F2B134] ${selectedLayerId === entry.id ? 'bg-[#F2B134]' : 'bg-transparent'}`} />
+                <span className="min-w-0"><span className="block truncate">{entry.title}</span><span className="text-[10px] text-[#8FA9AE]">{geometryLabel(entry.geometryType)} · {selectedLayerId === entry.id ? 'VISÍVEL / EXPORTÁVEL' : 'clique para isolar'}</span></span>
+              </button>)}</div>
             </div>)}
           </div>
 
-          {records.length > 0 && <section className="mt-6 border-t border-[#31515A] pt-4"><div className="flex items-center justify-between"><h2 className="text-xs font-bold uppercase tracking-[.2em] text-[#B8C9CC]">Interferências detectadas</h2><span className="rounded-full bg-[#F2B134] px-2 py-0.5 text-[10px] font-bold text-[#172B30]">{records.length}</span></div><p className="mt-2 text-[11px] text-[#8FA9AE]">Cada item é uma feição lógica consolidada; clique para destacar somente a ocorrência e exportar sua prancha.</p><div className="mt-3 grid grid-cols-2 gap-2"><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('png')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha PNG</Button><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('jpg')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha JPG</Button><Button size="sm" variant="outline" disabled={exportingSummary} onClick={exportSummary} className="col-span-2 border-[#F2B134] bg-[#F2B134]/10 text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={13} />{exportingSummary ? 'Gerando quadro-resumo…' : 'Quadro-resumo PNG (todas)'}</Button></div><div className="mt-3 space-y-2">{records.map((record) => <article key={record.id} className={`rounded border p-3 transition ${selectedId === record.id ? 'border-[#F2B134] bg-[#F2B134]/15' : 'border-[#31515A] bg-[#0B303A]/70'}`}><button className="w-full text-left" onClick={() => selectRecord(record)}><div className="flex items-start justify-between gap-2"><div><p className="text-xs font-bold text-[#F4F0E8]">{record.layerTitle}</p><p className="mt-1 text-[10px] uppercase tracking-wider text-[#F2B134]">{geometryLabel(record.geometryType)}</p></div><span className="text-[10px] text-[#8FA9AE]">{Object.keys(record.attributes).length} atributos</span></div><p className="mt-2 line-clamp-2 text-[11px] text-[#B8C9CC]">{Object.entries(record.attributes).slice(0, 2).map(([key, value]) => `${key}: ${String(value)}`).join(' · ')}</p></button><Button size="sm" variant="outline" className="mt-3 h-7 w-full border-[#55747B] bg-transparent text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]" disabled={exportingId === record.id} onClick={() => exportRecord(record)}>{exportingId === record.id ? <LoaderCircle className="mr-2 animate-spin" size={13} /> : <Download className="mr-2" size={13} />}Baixar prancha PNG</Button></article>)}</div></section>}
+          {layers.length > 0 && <section className="mt-5 rounded border border-[#31515A] bg-[#0B303A]/60 p-3"><div className="flex items-center justify-between"><label htmlFor="opacity" className="text-[11px] font-bold uppercase tracking-wider text-[#B8C9CC]">Transparência das camadas</label><span className="text-xs font-bold text-[#F2B134]">{Math.round((1 - layerOpacity) * 100)}%</span></div><input id="opacity" type="range" min="0.1" max="1" step="0.05" value={layerOpacity} onChange={(event) => changeOpacity(Number(event.target.value))} className="mt-2 w-full accent-[#F2B134]" /><p className="mt-1 text-[10px] text-[#8FA9AE]">Arraste para deixar o mapa-base mais visível.</p></section>}
+
+          {records.length > 0 && <section className="mt-6 border-t border-[#31515A] pt-4"><div className="flex items-center justify-between"><h2 className="text-xs font-bold uppercase tracking-[.2em] text-[#B8C9CC]">Interferências detectadas</h2><span className="rounded-full bg-[#F2B134] px-2 py-0.5 text-[10px] font-bold text-[#172B30]">{records.length}</span></div><p className="mt-2 text-[11px] text-[#8FA9AE]">Cada item é uma feição lógica consolidada; clique para destacar somente a ocorrência e exportar sua prancha.</p><div className="mt-3 grid grid-cols-2 gap-2"><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('png')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha PNG</Button><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('jpg')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha JPG</Button><Button size="sm" variant="outline" disabled={exportingSummary} onClick={exportSummary} className="col-span-2 border-[#F2B134] bg-[#F2B134]/10 text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={13} />{exportingSummary ? 'Gerando PDF…' : 'Relatório PDF paginado (camada/classe)'}</Button></div><div className="mt-3 space-y-2">{records.map((record) => <article key={record.id} className={`rounded border p-3 transition ${selectedId === record.id ? 'border-[#F2B134] bg-[#F2B134]/15' : 'border-[#31515A] bg-[#0B303A]/70'}`}><button className="w-full text-left" onClick={() => selectRecord(record)}><div className="flex items-start justify-between gap-2"><div><p className="text-xs font-bold text-[#F4F0E8]">{record.layerTitle}</p><p className="mt-1 text-[10px] uppercase tracking-wider text-[#F2B134]">{geometryLabel(record.geometryType)}</p></div><span className="text-[10px] text-[#8FA9AE]">{Object.keys(record.attributes).length} atributos</span></div><p className="mt-2 line-clamp-2 text-[11px] text-[#B8C9CC]">{Object.entries(record.attributes).slice(0, 2).map(([key, value]) => `${key}: ${String(value)}`).join(' · ')}</p></button><Button size="sm" variant="outline" className="mt-3 h-7 w-full border-[#55747B] bg-transparent text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]" disabled={exportingId === record.id} onClick={() => exportRecord(record)}>{exportingId === record.id ? <LoaderCircle className="mr-2 animate-spin" size={13} /> : <Download className="mr-2" size={13} />}Baixar prancha PNG</Button></article>)}</div></section>}
         </div>
 
         <footer className="space-y-2 border-t border-[#31515A] px-5 py-4"><div className="grid grid-cols-2 gap-2"><Button onClick={drawStudyArea} disabled={drawing || analyzing || !runtimeRef.current} className="bg-[#F2B134] text-[#172B30] hover:bg-[#FFD166]"><Play className="mr-2" size={15} />{drawing ? 'Desenhando…' : '1. Desenhar área'}</Button><Button onClick={analyzeStudyArea} disabled={analyzing || drawing || !studyAreaReady || !runtimeRef.current} className="bg-[#D98E2B] text-[#172B30] hover:bg-[#F2B134]"><Play className="mr-2" size={15} />{analyzing ? 'Analisando…' : '2. Analisar área'}</Button></div><Button onClick={clear} variant="outline" className="w-full border-[#55747B] bg-transparent text-[#F4F0E8] hover:bg-white/10"><Trash2 className="mr-2" size={15} />Limpar área e resultados</Button><Button onClick={() => setShowSettings((value) => !value)} variant="ghost" className="w-full justify-start text-[#B8C9CC] hover:bg-white/5 hover:text-white"><Settings2 className="mr-2" size={15} />Configuração do Portal e Web Map</Button></footer>
