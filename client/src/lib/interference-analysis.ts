@@ -54,6 +54,7 @@ export interface InterferenceRuntime {
   highlightRecord: (record: InterferenceRecord) => Promise<void>
   captureRecord: (record: InterferenceRecord) => Promise<CaptureResult>
   captureMap: () => Promise<CaptureResult>
+  captureSummary: () => Promise<CaptureResult>
   clearAnalysis: () => void
   destroy: () => void
 }
@@ -210,6 +211,11 @@ export async function createInterferenceRuntime(
               existing.graphic.geometry = merged as __esri.Geometry
               const previousRelation = String(existing.attributes._relacao_espacial || '')
               existing.attributes._relacao_espacial = previousRelation === relation ? relation : 'interseção'
+              // Mantém uma única geometria desenhada para a feição lógica consolidada.
+              resultLayer.graphics.toArray()
+                .filter((item) => item.attributes?.interferenceId === existing.id)
+                .forEach((item) => resultLayer.remove(item))
+              resultLayer.add(new Graphic({ geometry: merged as __esri.Geometry, symbol: existing.symbol as any, attributes: { interferenceId: existing.id, layerTitle: existing.layerTitle, logicalKey } }))
             }
             return
           }
@@ -254,14 +260,20 @@ export async function createInterferenceRuntime(
     }
   }
 
-  const captureRecord = async (record: InterferenceRecord) => {
+  const captureIsolated = async (record?: InterferenceRecord) => {
     const featureLayers = layers.map((entry) => ({ layer: entry.layer, visible: entry.layer.visible, opacity: entry.layer.opacity }))
     const resultGraphics = resultLayer.graphics.toArray().map((graphic) => ({ graphic, visible: graphic.visible }))
+    const studyVisible = studyLayer.visible
+    const labelsVisible = labelLayer.visible
     try {
-      // A prancha individual mostra apenas a camada que participa da ocorrência.
-      featureLayers.forEach(({ layer }) => { layer.visible = layer.id === record.layerId })
-      resultGraphics.forEach(({ graphic }) => { graphic.visible = graphic.attributes?.interferenceId === record.id })
-      await highlightRecord(record)
+      // A captura nunca usa o estado acumulado da tela: só os gráficos recortados pedidos.
+      featureLayers.forEach(({ layer }) => { layer.visible = false })
+      studyLayer.visible = false
+      labelLayer.visible = false
+      resultGraphics.forEach(({ graphic }) => {
+        graphic.visible = record ? graphic.attributes?.interferenceId === record.id : true
+      })
+      if (record) await view.goTo(record.graphic.geometry, { duration: 350 })
       const screenshot = await view.takeScreenshot({ format: 'png', quality: 95 })
       const extent = view.extent
       return {
@@ -271,19 +283,15 @@ export async function createInterferenceRuntime(
       }
     } finally {
       featureLayers.forEach(({ layer, visible, opacity }) => { layer.visible = visible; layer.opacity = opacity })
+      studyLayer.visible = studyVisible
+      labelLayer.visible = labelsVisible
       resultGraphics.forEach(({ graphic, visible }) => { graphic.visible = visible })
     }
   }
 
-  const captureMap = async () => {
-    const screenshot = await view.takeScreenshot({ format: 'png', quality: 95 })
-    const extent = view.extent
-    return {
-      dataUrl: screenshot.dataUrl,
-      extent: extent ? { xmin: extent.xmin, ymin: extent.ymin, xmax: extent.xmax, ymax: extent.ymax } : undefined,
-      spatialReference: extent?.spatialReference ? { wkid: extent.spatialReference.wkid ?? undefined, latestWkid: (extent.spatialReference as any).latestWkid ?? undefined } : undefined,
-    }
-  }
+  const captureRecord = async (record: InterferenceRecord) => captureIsolated(record)
+  const captureSummary = async () => captureIsolated()
+  const captureMap = async () => captureSummary()
 
   return {
     view,
@@ -293,6 +301,7 @@ export async function createInterferenceRuntime(
     highlightRecord,
     captureRecord,
     captureMap,
+    captureSummary,
     clearAnalysis: () => { studyLayer.removeAll(); resultLayer.removeAll(); labelLayer.removeAll() },
     destroy: () => { sketch.destroy(); view.destroy() },
   }

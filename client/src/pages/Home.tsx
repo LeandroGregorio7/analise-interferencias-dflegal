@@ -49,81 +49,124 @@ const loadImage = (dataUrl: string) => new Promise<HTMLImageElement>((resolve, r
   image.src = dataUrl
 })
 
-const composeInterferenceBoard = async (capture: CaptureResult, records: InterferenceRecord[], format: 'png' | 'jpg') => {
-  const mapDataUrl = capture.dataUrl
-  const image = await loadImage(mapDataUrl)
-  const canvas = document.createElement('canvas')
-  canvas.width = 2000
-  canvas.height = 1200
-  const context = canvas.getContext('2d')
-  if (!context) throw new Error('O navegador não disponibilizou a prancha de exportação.')
-  context.fillStyle = '#F4F0E8'; context.fillRect(0, 0, canvas.width, canvas.height)
-  context.strokeStyle = '#263D42'; context.lineWidth = 5; context.strokeRect(18, 18, canvas.width - 36, canvas.height - 36)
-  context.fillStyle = '#0B303A'; context.fillRect(28, 28, canvas.width - 56, 105)
-  context.fillStyle = '#F2B134'; context.font = '700 30px Arial'; context.fillText('DF LEGAL · ANÁLISE DE INTERFERÊNCIAS', 62, 72)
-  context.fillStyle = '#FFFFFF'; context.font = '700 22px Arial'; context.fillText('Prancha de interferências detectadas', 62, 108)
-  const mapX = 54; const mapY = 166; const mapW = 1220; const mapH = 960
-  context.fillStyle = '#FFFFFF'; context.fillRect(mapX - 8, mapY - 8, mapW + 16, mapH + 16)
-  const ratio = Math.min(mapW / image.width, mapH / image.height)
-  const drawW = image.width * ratio; const drawH = image.height * ratio
-  context.drawImage(image, mapX, mapY, drawW, drawH)
-  // Grade de coordenadas da extensão capturada, sem depender da legenda do mapa-base.
-  if (capture.extent) {
-    const { xmin, ymin, xmax, ymax } = capture.extent
-    const gridCount = 6
-    context.save()
-    context.strokeStyle = 'rgba(23,60,70,.34)'
-    context.fillStyle = 'rgba(23,60,70,.82)'
-    context.lineWidth = 1
-    context.font = '10px Arial'
-    for (let i = 0; i <= gridCount; i += 1) {
-      const px = mapX + (drawW * i) / gridCount
-      const py = mapY + (drawH * i) / gridCount
-      context.beginPath(); context.moveTo(px, mapY); context.lineTo(px, mapY + drawH); context.stroke()
-      context.beginPath(); context.moveTo(mapX, py); context.lineTo(mapX + drawW, py); context.stroke()
-      const xValue = xmin + ((xmax - xmin) * i) / gridCount
-      const yValue = ymax - ((ymax - ymin) * i) / gridCount
-      context.fillText(xValue.toFixed(0), px - 18, mapY + drawH + 15)
-      context.fillText(yValue.toFixed(0), mapX - 48, py + 3)
-    }
-    context.restore()
+const drawCoordinateGrid = (context: CanvasRenderingContext2D, capture: CaptureResult, mapX: number, mapY: number, mapW: number, mapH: number, drawW: number, drawH: number) => {
+  if (!capture.extent) return
+  const { xmin, ymin, xmax, ymax } = capture.extent
+  const gridCount = 5
+  context.save()
+  context.strokeStyle = 'rgba(23,60,70,.28)'
+  context.fillStyle = '#173C46'
+  context.lineWidth = 1
+  context.font = '600 16px Arial'
+  context.textAlign = 'center'
+  for (let i = 0; i <= gridCount; i += 1) {
+    const px = mapX + (drawW * i) / gridCount
+    const py = mapY + (drawH * i) / gridCount
+    context.beginPath(); context.moveTo(px, mapY); context.lineTo(px, mapY + drawH); context.stroke()
+    context.beginPath(); context.moveTo(mapX, py); context.lineTo(mapX + drawW, py); context.stroke()
+    // Topo horizontal: somente X no topo.
+    const xValue = xmin + ((xmax - xmin) * i) / gridCount
+    context.fillText(xValue.toFixed(0), px, mapY - 12)
+    // Lado esquerdo vertical: somente Y, crescendo visualmente de baixo para cima.
+    const yValue = ymax - ((ymax - ymin) * i) / gridCount
+    context.textAlign = 'right'
+    context.fillText(yValue.toFixed(0), mapX - 12, py + 6)
+    context.textAlign = 'center'
   }
-  context.strokeStyle = '#263D42'; context.lineWidth = 3; context.strokeRect(mapX, mapY, drawW, drawH)
-  const panelX = 1320; const panelW = 610
-  context.fillStyle = '#FFFFFF'; context.fillRect(panelX, 166, panelW, 960)
-  context.fillStyle = '#173C46'; context.font = '700 22px Arial'; context.fillText(`RESULTADOS (${records.length})`, panelX + 28, 210)
-  context.fillStyle = '#526166'; context.font = '13px Arial'; context.fillText('Cada item corresponde a uma feição que intersecta a área desenhada.', panelX + 28, 238)
-  let y = 280
-  records.slice(0, 18).forEach((record, index) => {
-    if (y > 1060) return
-    context.fillStyle = index % 2 ? '#F5F8F7' : '#EAF0EE'; context.fillRect(panelX + 20, y - 24, panelW - 40, 104)
-    context.fillStyle = '#173C46'; context.font = '700 14px Arial'; context.fillText(`${index + 1}. ${record.layerTitle}`, panelX + 34, y)
-    context.fillStyle = '#B06D1D'; context.font = '700 12px Arial'; context.fillText(`${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')}`, panelX + 34, y + 21)
-    context.fillStyle = '#526166'; context.font = '11px Arial'
-    const attrs = Object.entries(record.attributes).slice(0, 3).map(([key, value]) => `${key}: ${String(value)}`).join(' · ')
-    context.fillText(attrs.slice(0, 78), panelX + 34, y + 43)
-    context.fillStyle = '#173C46'; context.font = '11px Arial'; context.fillText(`ID: ${record.id}`, panelX + 34, y + 63)
-    y += 116
-  })
-  if (records.length > 18) { context.fillStyle = '#B93835'; context.font = '700 12px Arial'; context.fillText(`+ ${records.length - 18} interferência(s) no resultado completo`, panelX + 34, 1085) }
-  const legendEntries = Array.from(
-    new Map(
-      records.flatMap((record) =>
-        (record.involvedLayers || [{ id: record.layerId, title: record.layerTitle, symbol: record.symbol, geometryType: record.geometryType }])
-          .map((entry) => [entry.id, { ...record, ...entry }] as const),
-      ),
-    ).values(),
-  )
-  context.fillStyle = '#173C46'; context.font = '700 13px Arial'; context.fillText('LEGENDA DAS CAMADAS PARTICIPANTES', 62, 1150)
-  let legendX = 62
-  legendEntries.slice(0, 5).forEach((record) => {
+  context.restore()
+}
+
+const drawBoardChrome = (context: CanvasRenderingContext2D, title: string, subtitle: string, width: number, height: number) => {
+  context.fillStyle = '#F4F0E8'; context.fillRect(0, 0, width, height)
+  context.strokeStyle = '#263D42'; context.lineWidth = 5; context.strokeRect(18, 18, width - 36, height - 36)
+  context.fillStyle = '#0B303A'; context.fillRect(28, 28, width - 56, 124)
+  context.fillStyle = '#F2B134'; context.font = '700 38px Arial'; context.fillText('DF LEGAL · ANÁLISE DE INTERFERÊNCIAS', 62, 80)
+  context.fillStyle = '#FFFFFF'; context.font = '700 26px Arial'; context.fillText(title, 62, 124)
+  context.fillStyle = '#526166'; context.font = '600 18px Arial'; context.fillText(subtitle, 62, height - 28)
+}
+
+const drawLegend = (context: CanvasRenderingContext2D, records: InterferenceRecord[], x: number, y: number, maxWidth: number) => {
+  const legendEntries = Array.from(new Map(records.flatMap((record) =>
+    (record.involvedLayers || [{ id: record.layerId, title: record.layerTitle, symbol: record.symbol, geometryType: record.geometryType }])
+      .map((entry) => [entry.id, { ...record, ...entry }] as const),
+  )).values())
+  context.fillStyle = '#173C46'; context.font = '700 18px Arial'; context.fillText('LEGENDA DAS CAMADAS PARTICIPANTES', x, y)
+  let legendX = x
+  let legendY = y + 30
+  legendEntries.forEach((record) => {
+    const label = record.layerTitle.slice(0, 40)
+    const itemWidth = Math.min(420, 48 + label.length * 9)
+    if (legendX + itemWidth > x + maxWidth) { legendX = x; legendY += 30 }
     const swatch = symbolColor(record.symbol, record.geometryType === 'point' ? '#168AAD' : record.geometryType === 'polyline' ? '#F2B134' : '#E63946')
-    context.fillStyle = swatch; context.fillRect(legendX, 1162, 18, 12)
-    context.strokeStyle = '#526166'; context.lineWidth = 1; context.strokeRect(legendX, 1162, 18, 12)
-    context.fillStyle = '#526166'; context.font = '11px Arial'; context.fillText(record.layerTitle.slice(0, 30), legendX + 25, 1172)
-    legendX += Math.min(350, 45 + record.layerTitle.length * 7)
+    context.fillStyle = swatch; context.fillRect(legendX, legendY - 15, 24, 16)
+    context.strokeStyle = '#526166'; context.lineWidth = 1; context.strokeRect(legendX, legendY - 15, 24, 16)
+    context.fillStyle = '#526166'; context.font = '600 16px Arial'; context.fillText(label, legendX + 34, legendY)
+    legendX += itemWidth
   })
+}
+
+const composeInterferenceBoard = async (capture: CaptureResult, records: InterferenceRecord[], format: 'png' | 'jpg') => {
+  const image = await loadImage(capture.dataUrl)
+  const canvas = document.createElement('canvas'); canvas.width = 2000; canvas.height = 1200
+  const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou a prancha de exportação.')
+  drawBoardChrome(context, 'Prancha de interferência selecionada', 'Captura isolada: somente a geometria recortada selecionada e sua camada correspondente.', canvas.width, canvas.height)
+  const mapX = 82; const mapY = 220; const mapW = 1170; const mapH = 820
+  context.fillStyle = '#FFFFFF'; context.fillRect(mapX - 12, mapY - 32, mapW + 24, mapH + 44)
+  const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio
+  context.drawImage(image, mapX, mapY, drawW, drawH); drawCoordinateGrid(context, capture, mapX, mapY, mapW, mapH, drawW, drawH)
+  context.strokeStyle = '#263D42'; context.lineWidth = 3; context.strokeRect(mapX, mapY, drawW, drawH)
+  const panelX = 1325; const panelW = 590
+  context.fillStyle = '#FFFFFF'; context.fillRect(panelX, 220, panelW, 820)
+  context.fillStyle = '#173C46'; context.font = '700 27px Arial'; context.fillText('OCORRÊNCIA', panelX + 30, 270)
+  records.forEach((record, index) => {
+    const y = 330 + index * 250
+    context.fillStyle = '#EAF0EE'; context.fillRect(panelX + 22, y - 35, panelW - 44, 210)
+    context.fillStyle = '#173C46'; context.font = '700 22px Arial'; context.fillText(`${index + 1}. ${record.layerTitle}`, panelX + 38, y)
+    context.fillStyle = '#B06D1D'; context.font = '700 18px Arial'; context.fillText(`${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')}`, panelX + 38, y + 34)
+    context.fillStyle = '#526166'; context.font = '16px Arial'
+    Object.entries(record.attributes).slice(0, 5).forEach(([key, value], attrIndex) => context.fillText(`${key}: ${String(value).slice(0, 48)}`, panelX + 38, y + 70 + attrIndex * 24))
+  })
+  drawLegend(context, records, 82, 1100, 1170)
   return format === 'jpg' ? canvas.toDataURL('image/jpeg', 0.92) : canvas.toDataURL('image/png')
+}
+
+const composeSummaryInfographic = async (capture: CaptureResult, records: InterferenceRecord[]) => {
+  const image = await loadImage(capture.dataUrl)
+  const canvas = document.createElement('canvas'); canvas.width = 2000; canvas.height = 1450
+  const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou o quadro-resumo.')
+  drawBoardChrome(context, 'Quadro-resumo das interferências', 'Todas as interferências da área de estudo, com geometrias recortadas, camadas participantes e atributos essenciais.', canvas.width, canvas.height)
+  const mapX = 70; const mapY = 220; const mapW = 1170; const mapH = 760
+  context.fillStyle = '#FFFFFF'; context.fillRect(mapX - 12, mapY - 32, mapW + 24, mapH + 44)
+  const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio
+  context.drawImage(image, mapX, mapY, drawW, drawH); drawCoordinateGrid(context, capture, mapX, mapY, mapW, mapH, drawW, drawH)
+  context.strokeStyle = '#263D42'; context.lineWidth = 3; context.strokeRect(mapX, mapY, drawW, drawH)
+  const layerCount = new Set(records.map((record) => record.layerId)).size
+  context.fillStyle = '#FFFFFF'; context.fillRect(1290, 220, 625, 760)
+  context.fillStyle = '#173C46'; context.font = '700 28px Arial'; context.fillText('SÍNTESE', 1330, 280)
+  context.fillStyle = '#F2B134'; context.font = '700 64px Arial'; context.fillText(String(records.length), 1330, 370)
+  context.fillStyle = '#526166'; context.font = '600 20px Arial'; context.fillText('interferências consolidadas', 1330, 408)
+  context.fillStyle = '#F2B134'; context.font = '700 64px Arial'; context.fillText(String(layerCount), 1600, 370)
+  context.fillStyle = '#526166'; context.font = '600 20px Arial'; context.fillText('camadas participantes', 1600, 408)
+  const byLayer = Array.from(new Map(records.map((record) => [record.layerId, record])).values())
+  byLayer.forEach((record, index) => {
+    const y = 490 + index * 70
+    context.fillStyle = index % 2 ? '#F5F8F7' : '#EAF0EE'; context.fillRect(1320, y - 28, 560, 52)
+    const swatch = symbolColor(record.symbol, '#E63946'); context.fillStyle = swatch; context.fillRect(1340, y - 12, 22, 16)
+    context.fillStyle = '#173C46'; context.font = '700 18px Arial'; context.fillText(record.layerTitle.slice(0, 42), 1380, y)
+    context.fillStyle = '#526166'; context.font = '16px Arial'; context.fillText(`${records.filter((item) => item.layerId === record.layerId).length} ocorrência(s)`, 1680, y)
+  })
+  context.fillStyle = '#173C46'; context.font = '700 24px Arial'; context.fillText('INTERFERÊNCIAS CLIPADAS', 70, 1050)
+  const cardW = 900; const cardH = 92
+  records.forEach((record, index) => {
+    const col = index % 2; const row = Math.floor(index / 2); const x = 70 + col * 960; const y = 1100 + row * (cardH + 16)
+    if (y > 1350) return
+    context.fillStyle = index % 2 ? '#EAF0EE' : '#F5F8F7'; context.fillRect(x, y, cardW, cardH)
+    context.fillStyle = '#B06D1D'; context.font = '700 20px Arial'; context.fillText(`${index + 1}`, x + 18, y + 32)
+    context.fillStyle = '#173C46'; context.font = '700 18px Arial'; context.fillText(record.layerTitle.slice(0, 42), x + 58, y + 28)
+    context.fillStyle = '#526166'; context.font = '16px Arial'; context.fillText(`${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')} · ${record.id}`, x + 58, y + 58)
+  })
+  drawLegend(context, records, 70, 1400, 1840)
+  return canvas.toDataURL('image/png')
 }
 
 export default function Home() {
@@ -146,6 +189,7 @@ export default function Home() {
   const studyAreaRef = useRef<Polygon | null>(null)
   const [exportingId, setExportingId] = useState<string | null>(null)
   const [exportingBoard, setExportingBoard] = useState(false)
+  const [exportingSummary, setExportingSummary] = useState(false)
 
   const groupedLayers = useMemo(() => {
     const groups = new Map<string, InterferenceLayerInfo[]>()
@@ -234,6 +278,17 @@ export default function Home() {
     finally { setExportingBoard(false) }
   }
 
+  const exportSummary = async () => {
+    if (!runtimeRef.current || !records.length) return
+    setExportingSummary(true)
+    try {
+      const capture = await runtimeRef.current.captureSummary()
+      const board = await composeSummaryInfographic(capture, records)
+      downloadDataUrl(board, `quadro-resumo-interferencias-${new Date().toISOString().slice(0, 10)}.png`)
+    } catch (error) { setErrors([error instanceof Error ? error.message : 'Não foi possível gerar o quadro-resumo.']) }
+    finally { setExportingSummary(false) }
+  }
+
   const clear = () => {
     runtimeRef.current?.clearAnalysis()
     studyAreaRef.current = null
@@ -279,7 +334,7 @@ export default function Home() {
             </div>)}
           </div>
 
-          {records.length > 0 && <section className="mt-6 border-t border-[#31515A] pt-4"><div className="flex items-center justify-between"><h2 className="text-xs font-bold uppercase tracking-[.2em] text-[#B8C9CC]">Interferências detectadas</h2><span className="rounded-full bg-[#F2B134] px-2 py-0.5 text-[10px] font-bold text-[#172B30]">{records.length}</span></div><p className="mt-2 text-[11px] text-[#8FA9AE]">Cada item é uma feição lógica consolidada; clique para destacar somente a ocorrência e exportar sua prancha.</p><div className="mt-3 grid grid-cols-2 gap-2"><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('png')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha PNG</Button><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('jpg')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha JPG</Button></div><div className="mt-3 space-y-2">{records.map((record) => <article key={record.id} className={`rounded border p-3 transition ${selectedId === record.id ? 'border-[#F2B134] bg-[#F2B134]/15' : 'border-[#31515A] bg-[#0B303A]/70'}`}><button className="w-full text-left" onClick={() => selectRecord(record)}><div className="flex items-start justify-between gap-2"><div><p className="text-xs font-bold text-[#F4F0E8]">{record.layerTitle}</p><p className="mt-1 text-[10px] uppercase tracking-wider text-[#F2B134]">{geometryLabel(record.geometryType)}</p></div><span className="text-[10px] text-[#8FA9AE]">{Object.keys(record.attributes).length} atributos</span></div><p className="mt-2 line-clamp-2 text-[11px] text-[#B8C9CC]">{Object.entries(record.attributes).slice(0, 2).map(([key, value]) => `${key}: ${String(value)}`).join(' · ')}</p></button><Button size="sm" variant="outline" className="mt-3 h-7 w-full border-[#55747B] bg-transparent text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]" disabled={exportingId === record.id} onClick={() => exportRecord(record)}>{exportingId === record.id ? <LoaderCircle className="mr-2 animate-spin" size={13} /> : <Download className="mr-2" size={13} />}Baixar prancha PNG</Button></article>)}</div></section>}
+          {records.length > 0 && <section className="mt-6 border-t border-[#31515A] pt-4"><div className="flex items-center justify-between"><h2 className="text-xs font-bold uppercase tracking-[.2em] text-[#B8C9CC]">Interferências detectadas</h2><span className="rounded-full bg-[#F2B134] px-2 py-0.5 text-[10px] font-bold text-[#172B30]">{records.length}</span></div><p className="mt-2 text-[11px] text-[#8FA9AE]">Cada item é uma feição lógica consolidada; clique para destacar somente a ocorrência e exportar sua prancha.</p><div className="mt-3 grid grid-cols-2 gap-2"><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('png')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha PNG</Button><Button size="sm" variant="outline" disabled={exportingBoard} onClick={() => exportBoard('jpg')} className="border-[#55747B] bg-transparent text-[10px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={12} />Prancha JPG</Button><Button size="sm" variant="outline" disabled={exportingSummary} onClick={exportSummary} className="col-span-2 border-[#F2B134] bg-[#F2B134]/10 text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]"><Download className="mr-1" size={13} />{exportingSummary ? 'Gerando quadro-resumo…' : 'Quadro-resumo PNG (todas)'}</Button></div><div className="mt-3 space-y-2">{records.map((record) => <article key={record.id} className={`rounded border p-3 transition ${selectedId === record.id ? 'border-[#F2B134] bg-[#F2B134]/15' : 'border-[#31515A] bg-[#0B303A]/70'}`}><button className="w-full text-left" onClick={() => selectRecord(record)}><div className="flex items-start justify-between gap-2"><div><p className="text-xs font-bold text-[#F4F0E8]">{record.layerTitle}</p><p className="mt-1 text-[10px] uppercase tracking-wider text-[#F2B134]">{geometryLabel(record.geometryType)}</p></div><span className="text-[10px] text-[#8FA9AE]">{Object.keys(record.attributes).length} atributos</span></div><p className="mt-2 line-clamp-2 text-[11px] text-[#B8C9CC]">{Object.entries(record.attributes).slice(0, 2).map(([key, value]) => `${key}: ${String(value)}`).join(' · ')}</p></button><Button size="sm" variant="outline" className="mt-3 h-7 w-full border-[#55747B] bg-transparent text-[11px] text-[#F4F0E8] hover:bg-[#F2B134] hover:text-[#172B30]" disabled={exportingId === record.id} onClick={() => exportRecord(record)}>{exportingId === record.id ? <LoaderCircle className="mr-2 animate-spin" size={13} /> : <Download className="mr-2" size={13} />}Baixar prancha PNG</Button></article>)}</div></section>}
         </div>
 
         <footer className="space-y-2 border-t border-[#31515A] px-5 py-4"><div className="grid grid-cols-2 gap-2"><Button onClick={drawStudyArea} disabled={drawing || analyzing || !runtimeRef.current} className="bg-[#F2B134] text-[#172B30] hover:bg-[#FFD166]"><Play className="mr-2" size={15} />{drawing ? 'Desenhando…' : '1. Desenhar área'}</Button><Button onClick={analyzeStudyArea} disabled={analyzing || drawing || !studyAreaReady || !runtimeRef.current} className="bg-[#D98E2B] text-[#172B30] hover:bg-[#F2B134]"><Play className="mr-2" size={15} />{analyzing ? 'Analisando…' : '2. Analisar área'}</Button></div><Button onClick={clear} variant="outline" className="w-full border-[#55747B] bg-transparent text-[#F4F0E8] hover:bg-white/10"><Trash2 className="mr-2" size={15} />Limpar área e resultados</Button><Button onClick={() => setShowSettings((value) => !value)} variant="ghost" className="w-full justify-start text-[#B8C9CC] hover:bg-white/5 hover:text-white"><Settings2 className="mr-2" size={15} />Configuração do Portal e Web Map</Button></footer>
