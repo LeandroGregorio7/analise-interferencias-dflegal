@@ -289,7 +289,12 @@ export async function createInterferenceRuntime(
     }
   }
 
-  const captureRecord = async (record: InterferenceRecord) => captureIsolated(record)
+  const captureRecord = async (record: InterferenceRecord) => {
+    // Garante que o modo de exportação sempre parte da ocorrência selecionada,
+    // independentemente do estado visual anterior do mapa.
+    await highlightRecord(record)
+    return captureIsolated(record)
+  }
   const captureSummary = async () => captureIsolated()
   const captureMap = async () => captureSummary()
 

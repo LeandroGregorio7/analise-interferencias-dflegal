@@ -33,12 +33,18 @@ const downloadDataUrl = (dataUrl: string, filename: string) => {
 }
 const geometryLabel = (type?: string) => type === 'point' ? 'Ponto' : type === 'polyline' ? 'Linha' : 'Polígono'
 const symbolColor = (symbol?: __esri.Symbol, fallback = '#E63946') => {
-  const color = (symbol as any)?.color
-  if (color?.toRgba) {
-    const [r, g, b, a] = color.toRgba()
-    return `rgba(${r},${g},${b},${a ?? 1})`
+  const candidate = symbol as any
+  const colors = [candidate?.color, candidate?.outline?.color]
+  for (const color of colors) {
+    if (color?.toRgba) {
+      const [r, g, b, a] = color.toRgba()
+      if ((a ?? 1) > 0.05 && (r + g + b) > 24) return `rgba(${r},${g},${b},${a ?? 1})`
+    }
+    if (Array.isArray(color) && (color[3] ?? 255) > 12 && (color[0] + color[1] + color[2]) > 24) return `rgba(${color[0]},${color[1]},${color[2]},${(color[3] ?? 255) / 255})`
   }
-  if (Array.isArray(color)) return `rgba(${color[0]},${color[1]},${color[2]},${(color[3] ?? 255) / 255})`
+  const json = candidate?.toJSON?.()
+  const jsonColor = json?.color || json?.symbol?.color || json?.outline?.color
+  if (Array.isArray(jsonColor) && (jsonColor[3] ?? 255) > 12 && (jsonColor[0] + jsonColor[1] + jsonColor[2]) > 24) return `rgba(${jsonColor[0]},${jsonColor[1]},${jsonColor[2]},${(jsonColor[3] ?? 255) / 255})`
   return fallback
 }
 
@@ -110,7 +116,7 @@ const composeInterferenceBoard = async (capture: CaptureResult, records: Interfe
   const canvas = document.createElement('canvas'); canvas.width = 2000; canvas.height = 1200
   const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou a prancha de exportação.')
   drawBoardChrome(context, 'Prancha de interferência selecionada', 'Captura isolada: somente a geometria recortada selecionada e sua camada correspondente.', canvas.width, canvas.height)
-  const mapX = 82; const mapY = 220; const mapW = 1170; const mapH = 820
+  const mapX = 140; const mapY = 220; const mapW = 1100; const mapH = 820
   context.fillStyle = '#FFFFFF'; context.fillRect(mapX - 12, mapY - 32, mapW + 24, mapH + 44)
   const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio
   context.drawImage(image, mapX, mapY, drawW, drawH); drawCoordinateGrid(context, capture, mapX, mapY, mapW, mapH, drawW, drawH)
@@ -132,40 +138,59 @@ const composeInterferenceBoard = async (capture: CaptureResult, records: Interfe
 
 const composeSummaryInfographic = async (capture: CaptureResult, records: InterferenceRecord[]) => {
   const image = await loadImage(capture.dataUrl)
-  const canvas = document.createElement('canvas'); canvas.width = 2000; canvas.height = 1450
-  const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou o quadro-resumo.')
-  drawBoardChrome(context, 'Quadro-resumo das interferências', 'Todas as interferências da área de estudo, com geometrias recortadas, camadas participantes e atributos essenciais.', canvas.width, canvas.height)
-  const mapX = 70; const mapY = 220; const mapW = 1170; const mapH = 760
-  context.fillStyle = '#FFFFFF'; context.fillRect(mapX - 12, mapY - 32, mapW + 24, mapH + 44)
-  const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio
-  context.drawImage(image, mapX, mapY, drawW, drawH); drawCoordinateGrid(context, capture, mapX, mapY, mapW, mapH, drawW, drawH)
-  context.strokeStyle = '#263D42'; context.lineWidth = 3; context.strokeRect(mapX, mapY, drawW, drawH)
-  const layerCount = new Set(records.map((record) => record.layerId)).size
-  context.fillStyle = '#FFFFFF'; context.fillRect(1290, 220, 625, 760)
-  context.fillStyle = '#173C46'; context.font = '700 28px Arial'; context.fillText('SÍNTESE', 1330, 280)
-  context.fillStyle = '#F2B134'; context.font = '700 64px Arial'; context.fillText(String(records.length), 1330, 370)
-  context.fillStyle = '#526166'; context.font = '600 20px Arial'; context.fillText('interferências consolidadas', 1330, 408)
-  context.fillStyle = '#F2B134'; context.font = '700 64px Arial'; context.fillText(String(layerCount), 1600, 370)
-  context.fillStyle = '#526166'; context.font = '600 20px Arial'; context.fillText('camadas participantes', 1600, 408)
+  const width = 1400
+  const margin = 60
+  const mapX = 120
+  const mapW = width - mapX - margin
+  const mapH = 720
   const byLayer = Array.from(new Map(records.map((record) => [record.layerId, record])).values())
+  const layerRows = Math.max(1, byLayer.length)
+  const cardH = 86
+  const cardsGap = 14
+  const panelY = 1010
+  const panelHeight = 300 + layerRows * 66
+  const cardsStart = panelY + panelHeight + 100
+  const recordsHeight = Math.max(1, records.length) * (cardH + cardsGap)
+  const legendRows = Math.max(1, Math.ceil(Math.max(1, byLayer.length) / 2))
+  const height = cardsStart + recordsHeight + 180 + legendRows * 34
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
+  const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou o quadro-resumo.')
+  drawBoardChrome(context, 'Quadro-resumo técnico das interferências', 'Síntese completa da área analisada — geometria clipada, camadas participantes e ocorrências consolidadas.', width, height)
+
+  const mapY = 220
+  context.fillStyle = '#FFFFFF'; context.fillRect(mapX - 14, mapY - 34, mapW + 28, mapH + 48)
+  const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio
+  const centeredX = mapX + (mapW - drawW) / 2
+  context.drawImage(image, centeredX, mapY, drawW, drawH)
+  drawCoordinateGrid(context, capture, centeredX, mapY, drawW, drawH, drawW, drawH)
+  context.strokeStyle = '#263D42'; context.lineWidth = 3; context.strokeRect(centeredX, mapY, drawW, drawH)
+
+  context.fillStyle = '#FFFFFF'; context.fillRect(margin, panelY, mapW, panelHeight)
+  context.fillStyle = '#173C46'; context.font = '700 30px Arial'; context.fillText('SÍNTESE DA ANÁLISE', margin + 34, panelY + 56)
+  context.fillStyle = '#F2B134'; context.font = '700 64px Arial'; context.fillText(String(records.length), margin + 38, panelY + 140)
+  context.fillStyle = '#526166'; context.font = '600 20px Arial'; context.fillText('interferências consolidadas', margin + 38, panelY + 178)
+  context.fillStyle = '#F2B134'; context.font = '700 64px Arial'; context.fillText(String(byLayer.length), margin + 430, panelY + 140)
+  context.fillStyle = '#526166'; context.font = '600 20px Arial'; context.fillText('camadas participantes', margin + 430, panelY + 178)
+  context.fillStyle = '#173C46'; context.font = '700 22px Arial'; context.fillText('Distribuição por camada', margin + 38, panelY + 235)
   byLayer.forEach((record, index) => {
-    const y = 490 + index * 70
-    context.fillStyle = index % 2 ? '#F5F8F7' : '#EAF0EE'; context.fillRect(1320, y - 28, 560, 52)
-    const swatch = symbolColor(record.symbol, '#E63946'); context.fillStyle = swatch; context.fillRect(1340, y - 12, 22, 16)
-    context.fillStyle = '#173C46'; context.font = '700 18px Arial'; context.fillText(record.layerTitle.slice(0, 42), 1380, y)
-    context.fillStyle = '#526166'; context.font = '16px Arial'; context.fillText(`${records.filter((item) => item.layerId === record.layerId).length} ocorrência(s)`, 1680, y)
+    const y = panelY + 280 + index * 66
+    context.fillStyle = index % 2 ? '#F5F8F7' : '#EAF0EE'; context.fillRect(margin + 28, y - 27, mapW - 56, 48)
+    const swatch = symbolColor(record.symbol, '#E63946'); context.fillStyle = swatch; context.fillRect(margin + 46, y - 12, 22, 16)
+    context.fillStyle = '#173C46'; context.font = '700 17px Arial'; context.fillText(record.layerTitle.slice(0, 70), margin + 86, y)
+    context.fillStyle = '#526166'; context.font = '16px Arial'; context.textAlign = 'right'; context.fillText(`${records.filter((item) => item.layerId === record.layerId).length} ocorrência(s)`, width - margin - 46, y); context.textAlign = 'left'
   })
-  context.fillStyle = '#173C46'; context.font = '700 24px Arial'; context.fillText('INTERFERÊNCIAS CLIPADAS', 70, 1050)
-  const cardW = 900; const cardH = 92
+
+  const recordsTitleY = cardsStart - 38
+  context.fillStyle = '#173C46'; context.font = '700 28px Arial'; context.fillText('INTERFERÊNCIAS CLIPADAS', margin, recordsTitleY)
   records.forEach((record, index) => {
-    const col = index % 2; const row = Math.floor(index / 2); const x = 70 + col * 960; const y = 1100 + row * (cardH + 16)
-    if (y > 1350) return
-    context.fillStyle = index % 2 ? '#EAF0EE' : '#F5F8F7'; context.fillRect(x, y, cardW, cardH)
-    context.fillStyle = '#B06D1D'; context.font = '700 20px Arial'; context.fillText(`${index + 1}`, x + 18, y + 32)
-    context.fillStyle = '#173C46'; context.font = '700 18px Arial'; context.fillText(record.layerTitle.slice(0, 42), x + 58, y + 28)
-    context.fillStyle = '#526166'; context.font = '16px Arial'; context.fillText(`${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')} · ${record.id}`, x + 58, y + 58)
+    const y = cardsStart + index * (cardH + cardsGap)
+    context.fillStyle = index % 2 ? '#EAF0EE' : '#F5F8F7'; context.fillRect(margin, y, mapW, cardH)
+    context.fillStyle = '#B06D1D'; context.font = '700 22px Arial'; context.fillText(`${index + 1}`, margin + 22, y + 34)
+    context.fillStyle = '#173C46'; context.font = '700 19px Arial'; context.fillText(record.layerTitle.slice(0, 74), margin + 70, y + 29)
+    context.fillStyle = '#526166'; context.font = '16px Arial'; context.fillText(`${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')} · ${record.id}`, margin + 70, y + 57)
   })
-  drawLegend(context, records, 70, 1400, 1840)
+  const legendY = cardsStart + recordsHeight + 44
+  drawLegend(context, records, margin, legendY, mapW)
   return canvas.toDataURL('image/png')
 }
 
