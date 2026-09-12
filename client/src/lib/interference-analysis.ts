@@ -333,7 +333,10 @@ export async function createInterferenceRuntime(
     })
   }
   const setLayerOpacity = (opacity: number) => {
-    layers.forEach((entry) => { entry.layer.opacity = Math.max(0.1, Math.min(1, opacity)) })
+    const value = Math.max(0.1, Math.min(1, opacity))
+    layers.forEach((entry) => { entry.layer.opacity = value })
+    resultLayer.opacity = value
+    studyLayer.opacity = value
   }
 
   return {
