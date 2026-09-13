@@ -141,7 +141,7 @@ const exportIndividualPdf = async (capture: CaptureResult, record: InterferenceR
   pdf.setFillColor(11,48,58); pdf.rect(0,0,w,25,'F'); pdf.setTextColor(242,177,52); pdf.setFont('helvetica','bold'); pdf.setFontSize(15); pdf.text('DF LEGAL · ANÁLISE DE INTERFERÊNCIAS',m,11); pdf.setTextColor(255,255,255); pdf.setFontSize(10); pdf.text('Interferência selecionada',m,19)
   const mapW=178, mapH=150, mapX=m, mapY=35; const ratio=Math.min(mapW/image.width,mapH/image.height); const dw=image.width*ratio, dh=image.height*ratio
   pdf.addImage(image,'PNG',mapX+(mapW-dw)/2,mapY+(mapH-dh)/2,dw,dh); pdf.setDrawColor(38,61,66); pdf.rect(mapX,mapY,mapW,mapH)
-  pdf.setTextColor(23,60,70); pdf.setFont('helvetica','bold'); pdf.setFontSize(13); pdf.text(record.layerTitle,205,44); pdf.setFontSize(11); pdf.text(`Classe: ${classValue(record).slice(0,55)}`,205,53); pdf.text(`Tipo: ${geometryLabel(record.geometryType)}`,205,61); pdf.text(`Relação: ${String(record.attributes._relacao_espacial || 'interseção')}`,205,69)
+  pdf.setTextColor(23,60,70); pdf.setFont('helvetica','bold'); pdf.setFontSize(13); pdf.text(record.layerTitle,205,44); pdf.setFontSize(11); pdf.text(pdf.splitTextToSize(`Classe: ${classValue(record)}`, 78).slice(0,2),205,53); pdf.text(`Tipo: ${geometryLabel(record.geometryType)}`,205,68); pdf.text(`Relação: ${String(record.attributes._relacao_espacial || 'interseção')}`,205,75)
   pdf.setFont('helvetica','normal'); pdf.setFontSize(9); let y=82; Object.entries(record.attributes).filter(([key])=>!key.startsWith('_')).slice(0,9).forEach(([key,value])=>{ pdf.text(`${key}: ${String(value).slice(0,65)}`,205,y); y+=7 })
   pdf.setFillColor(230,57,70); pdf.rect(205,177,6,4,'F'); pdf.setTextColor(23,60,70); pdf.text(`Legenda — ${legendLabel(record).slice(0,55)}`,214,181)
   pdf.save(`interferencia-${slug(record.layerTitle)}-${slug(record.id)}.pdf`)
@@ -275,10 +275,13 @@ const exportSummaryPdf = (records: InterferenceRecord[]) => {
   drawTableHeader()
   for (const [layerTitle, classes] of Array.from(groups.entries())) {
     for (const [klass, count] of Array.from(classes.entries())) {
-      if (y > 275) { header('Relatório consolidado — continuação'); y = 42; drawTableHeader() }
-      pdf.setFillColor((y / 9) % 2 ? 245 : 234, 248, 247); pdf.rect(margin, y, pageWidth - margin * 2, 12, 'F')
+      pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8)
+      const classLines = pdf.splitTextToSize(klass, 103).slice(0, 3)
+      const rowHeight = Math.max(12, classLines.length * 7 + 5)
+      if (y + rowHeight > 275) { header('Relatório consolidado — continuação'); y = 42; drawTableHeader() }
+      pdf.setFillColor((y / 9) % 2 ? 245 : 234, 248, 247); pdf.rect(margin, y, pageWidth - margin * 2, rowHeight, 'F')
       pdf.setTextColor(23, 60, 70); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8); pdf.text(layerTitle.slice(0, 34), margin + 3, y + 8)
-      pdf.setFont('helvetica', 'normal'); pdf.text(klass.slice(0, 52), margin + 76, y + 8); pdf.text(String(count), pageWidth - margin - 15, y + 8); y += 12
+      pdf.setFont('helvetica', 'normal'); pdf.text(classLines, margin + 76, y + 7, { maxWidth: 103 }); pdf.text(String(count), pageWidth - margin - 15, y + 8); y += rowHeight
     }
   }
   header('Critérios do consolidado')

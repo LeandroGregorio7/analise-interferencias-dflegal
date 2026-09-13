@@ -130,6 +130,7 @@ const classFieldsForLayer = (title: string): string[][] => {
   if (name.includes('proprios_gdf')) return [['destinacao']]
   if (name.includes('lotes_registrados')) return [['ciu']]
   if (name.includes('lote_luos')) return [['uos', 'uso_luos']]
+  if (name.includes('ocupac')) return [['ciu']]
   if (name.includes('lotes_rurais')) return [['tipo']]
   if (name.includes('zoneamento_apa')) return [['zona', 'dsc_zona']]
   if (name.includes('onda')) return [['assunto']]
@@ -284,7 +285,7 @@ export async function createInterferenceRuntime(
             graphic: clippedGraphic,
             symbol: sourceSymbol,
             involvedLayers: [{ id: entry.id, title: entry.title, symbol: sourceSymbol, geometryType: entry.geometryType }],
-            attributes: { ...attrs, _classe_legenda: aggregateByLayer ? entry.title : classLabel, _identificadores_agrupados: compactLayer(entry.title) ? [...identifierFields.map((field) => Object.entries(attrs).find(([key]) => normalized(key) === field)?.[1]).filter((value) => value !== undefined && String(value).trim()).map(String), objectId !== undefined ? String(objectId) : ''].filter(Boolean).join(', ') : '', _relacao_espacial: relation, _feicao_logica: objectId ?? 'sem OBJECTID' },
+            attributes: { ...attrs, _classe_legenda: classLabel, _identificadores_agrupados: compactLayer(entry.title) ? [...identifierFields.map((field) => Object.entries(attrs).find(([key]) => normalized(key) === field)?.[1]).filter((value) => value !== undefined && String(value).trim()).map(String), objectId !== undefined ? String(objectId) : ''].filter(Boolean).join(', ') : '', _relacao_espacial: relation, _feicao_logica: objectId ?? 'sem OBJECTID' },
           }
           byLogicalFeature.set(logicalKey, record)
           records.push(record)
