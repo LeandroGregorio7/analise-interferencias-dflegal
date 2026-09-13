@@ -58,6 +58,7 @@ export interface InterferenceRuntime {
   captureSummary: () => Promise<CaptureResult>
   setLayerSelection: (layerId: string | null) => void
   setLayerOpacity: (opacity: number) => void
+  setBorderWidth: (width: number) => void
   clearAnalysis: () => void
   destroy: () => void
 }
@@ -111,6 +112,39 @@ const symbolFor = (geometryType: InterferenceGeometry, selected = false) => {
   }
   return new SimpleFillSymbol({ color: selected ? '#FFD166' : '#E63946', outline: new SimpleLineSymbol({ color, width: selected ? 5 : 3 }) })
 }
+
+const normalized = (value: string) => value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+const classFieldsForLayer = (title: string): string[] => {
+  const name = normalized(title)
+  if (name.includes('relatorios_ugm') || name.includes('relatórios ugm')) return ['ugm_numero', 'ugm_data']
+  if (name.includes('terracap_fundiario')) return ['situacao_fundiaria']
+  if (name.includes('imoveis_urbanos')) return ['condicao']
+  if (name.includes('puos')) return ['uso_luos']
+  if (name.includes('concessao_rural')) return ['processo_etr']
+  if (name.includes('outorga')) return ['nome']
+  if (name.includes('areas_regularizacao')) return ['nome', 'tipo']
+  if (name.includes('zoneamento_pdot')) return ['macrozona', 'zona']
+  if (name.includes('regioes_administrativas')) return ['nome']
+  if (name.includes('diretrizes_urbanisticas')) return ['zona']
+  if (name.includes('poligonais_de_estudo')) return ['nome', 'numero']
+  if (name.includes('proprios_gdf')) return ['destinacao']
+  if (name.includes('lotes_registrados')) return ['ciu']
+  if (name.includes('lote_luos')) return ['uos']
+  if (name.includes('lotes_rurais')) return ['tipo']
+  if (name.includes('zoneamento_apa')) return ['zona']
+  if (name.includes('onda')) return ['assunto']
+  return []
+}
+const classLabelFor = (title: string, attributes: Record<string, unknown>) => {
+  const fields = classFieldsForLayer(title)
+  const pairs = fields.map((field) => {
+    const found = Object.entries(attributes).find(([key]) => normalized(key) === normalized(field))
+    return found && String(found[1]).trim() ? String(found[1]).trim() : ''
+  }).filter(Boolean)
+  return pairs.join(' · ') || 'Classe não informada'
+}
+const compactLayer = (title: string) => { const name = normalized(title); return name.includes('lote') || name.includes('ocupacao') || name.includes('ocupação') }
+const identifierFields = ['ciu', 'uos', 'id', 'objectid', 'fid', 'codigo', 'numero']
 
 export async function createInterferenceRuntime(
   container: HTMLDivElement,
@@ -214,7 +248,12 @@ export async function createInterferenceRuntime(
           const objectId = graphic.attributes?.[entry.layer.objectIdField]
           // Uma mesma feição pode retornar mais de um fragmento (multipart/dissolve).
           // A unidade selecionável deve ser a feição lógica, não cada fragmento.
-          const logicalKey = `${entry.id}:${objectId ?? JSON.stringify(displayAttributes(graphic))}`
+          const attrs = displayAttributes(graphic)
+          const classLabel = classLabelFor(entry.title, attrs)
+          const aggregateByLayer = normalized(entry.title).includes('lotes_registrados') || normalized(entry.title).includes('ocupacao')
+          const logicalKey = compactLayer(entry.title)
+            ? `${entry.id}:agrupado:${aggregateByLayer ? 'todos' : classLabel}`
+            : `${entry.id}:${objectId ?? JSON.stringify(attrs)}`
           const existing = byLogicalFeature.get(logicalKey)
           if (existing) {
             const merged = geometryEngine.union([existing.graphic.geometry!, clippedGeometry])
@@ -222,6 +261,11 @@ export async function createInterferenceRuntime(
               existing.graphic.geometry = merged as __esri.Geometry
               const previousRelation = String(existing.attributes._relacao_espacial || '')
               existing.attributes._relacao_espacial = previousRelation === relation ? relation : 'interseção'
+              if (compactLayer(entry.title)) {
+                const ids = new Set(String(existing.attributes._identificadores_agrupados || '').split(', ').filter(Boolean))
+                identifierFields.forEach((field) => { const value = Object.entries(attrs).find(([key]) => normalized(key) === field)?.[1]; if (value !== undefined && String(value).trim()) ids.add(String(value).trim()) })
+                existing.attributes._identificadores_agrupados = Array.from(ids).join(', ')
+              }
               // Mantém uma única geometria desenhada para a feição lógica consolidada.
               resultLayer.graphics.toArray()
                 .filter((item) => item.attributes?.interferenceId === existing.id)
@@ -238,7 +282,7 @@ export async function createInterferenceRuntime(
             graphic: clippedGraphic,
             symbol: sourceSymbol,
             involvedLayers: [{ id: entry.id, title: entry.title, symbol: sourceSymbol, geometryType: entry.geometryType }],
-            attributes: { ...displayAttributes(graphic), _relacao_espacial: relation, _feicao_logica: objectId ?? 'sem OBJECTID' },
+            attributes: { ...attrs, _classe_legenda: aggregateByLayer ? entry.title : classLabel, _identificadores_agrupados: compactLayer(entry.title) ? identifierFields.map((field) => Object.entries(attrs).find(([key]) => normalized(key) === field)?.[1]).filter((value) => value !== undefined && String(value).trim()).map(String).join(', ') : '', _relacao_espacial: relation, _feicao_logica: objectId ?? 'sem OBJECTID' },
           }
           byLogicalFeature.set(logicalKey, record)
           records.push(record)
@@ -332,6 +376,15 @@ export async function createInterferenceRuntime(
       graphic.visible = layerId === null || graphic.attributes?.layerId === layerId || graphic.attributes?.interferenceId?.startsWith(`${layerId}-`)
     })
   }
+  const setBorderWidth = (width: number) => {
+    const value = Math.max(1, Math.min(12, width))
+    resultLayer.graphics.forEach((graphic) => {
+      const symbol: any = graphic.symbol
+      if (symbol?.outline) symbol.outline.width = value
+      else if (symbol?.width !== undefined) symbol.width = value
+    })
+  }
+
   const setLayerOpacity = (opacity: number) => {
     const value = Math.max(0.1, Math.min(1, opacity))
     layers.forEach((entry) => { entry.layer.opacity = value })
@@ -351,6 +404,7 @@ export async function createInterferenceRuntime(
     captureSummary,
     setLayerSelection,
     setLayerOpacity,
+    setBorderWidth,
     clearAnalysis: () => { studyLayer.removeAll(); resultLayer.removeAll(); labelLayer.removeAll() },
     destroy: () => { sketch.destroy(); view.destroy() },
   }
