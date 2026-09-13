@@ -50,6 +50,15 @@ const symbolColor = (symbol?: __esri.Symbol, fallback = '#E63946') => {
   return fallback
 }
 
+const cssRgb = (value: string, fallback: [number, number, number] = [230, 57, 70]): [number, number, number] => {
+  const rgba = value.match(/rgba?\(([^)]+)\)/i)?.[1].split(',').map((part) => Number(part.trim()))
+  if (rgba && rgba.length >= 3 && rgba.every((part) => Number.isFinite(part))) return [rgba[0], rgba[1], rgba[2]]
+  const hex = value.match(/^#([0-9a-f]{6})$/i)?.[1]
+  if (hex) return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)]
+  return fallback
+}
+const mapColorForLegend = (record: InterferenceRecord, selected = false) => selected ? '#FFD166' : symbolColor(record.symbol, record.geometryType === 'point' ? '#168AAD' : record.geometryType === 'polyline' ? '#F2B134' : '#E63946')
+
 const loadImage = (dataUrl: string) => new Promise<HTMLImageElement>((resolve, reject) => {
   const image = new Image()
   image.onload = () => resolve(image)
@@ -94,24 +103,27 @@ const drawBoardChrome = (context: CanvasRenderingContext2D, title: string, subti
 }
 
 const drawLegend = (context: CanvasRenderingContext2D, records: InterferenceRecord[], x: number, y: number, maxWidth: number) => {
-  const entries = Array.from(new Map(records.map((record) => [`${record.layerId}:${classValue(record)}`, record])).values())
+  const entries = Array.from(new Map(records.map((record) => [legendLabel(record), record])).values())
   context.fillStyle = '#173C46'; context.font = '700 18px Arial'; context.fillText('LEGENDA DAS CLASSES DAS INTERFERÊNCIAS', x, y)
-  let legendX = x; let legendY = y + 30
+  let legendX = x; let legendY = y + 30; const rowHeight = 42; const gap = 24
   entries.forEach((record) => {
-    const label = legendLabel(record).slice(0, 78)
-    const itemWidth = Math.min(460, 48 + label.length * 9)
-    if (legendX + itemWidth > x + maxWidth) { legendX = x; legendY += 30 }
-    const swatch = symbolColor(record.symbol, record.geometryType === 'point' ? '#168AAD' : record.geometryType === 'polyline' ? '#F2B134' : '#E63946')
-    context.fillStyle = swatch; context.fillRect(legendX, legendY - 15, 24, 16)
-    context.strokeStyle = '#526166'; context.lineWidth = 1; context.strokeRect(legendX, legendY - 15, 24, 16)
-    context.fillStyle = '#526166'; context.font = '600 16px Arial'; context.fillText(label, legendX + 34, legendY)
+    const label = legendLabel(record); const words = label.split(' '); const lines: string[] = []; let line = ''
+    words.forEach((word) => { const candidate = line ? `${line} ${word}` : word; if (context.measureText(candidate).width > maxWidth - 42 && line) { lines.push(line); line = word } else line = candidate })
+    if (line) lines.push(line)
+    const itemWidth = Math.min(maxWidth, Math.max(260, context.measureText(lines[0] || label).width + 48))
+    if (legendX !== x && legendX + itemWidth > x + maxWidth) { legendX = x; legendY += rowHeight * Math.max(1, lines.length) + gap }
+    const swatch = mapColorForLegend(record); context.fillStyle = swatch; context.fillRect(legendX, legendY - 15, 24, 16); context.strokeStyle = '#526166'; context.lineWidth = 1; context.strokeRect(legendX, legendY - 15, 24, 16)
+    context.fillStyle = '#526166'; context.font = '600 16px Arial'; lines.forEach((text, index) => context.fillText(text, legendX + 34, legendY + index * 20))
     legendX += itemWidth
   })
+  return legendY + 28
 }
+
 
 const composeInterferenceBoard = async (capture: CaptureResult, records: InterferenceRecord[], format: 'png' | 'jpg') => {
   const image = await loadImage(capture.dataUrl)
-  const canvas = document.createElement('canvas'); canvas.width = 2000; canvas.height = 1200
+  const legendExtra = Math.max(0, records.reduce((total, record) => total + Math.ceil(legendLabel(record).length / 52) * 24, 0) - 96)
+  const canvas = document.createElement('canvas'); canvas.width = 2000; canvas.height = 1200 + legendExtra
   const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou a prancha de exportação.')
   drawBoardChrome(context, 'Prancha de interferência selecionada', 'Captura isolada: somente a geometria recortada selecionada e sua camada correspondente.', canvas.width, canvas.height)
   const mapX = 140; const mapY = 220; const mapW = 1100; const mapH = 820
@@ -143,7 +155,7 @@ const exportIndividualPdf = async (capture: CaptureResult, record: InterferenceR
   pdf.addImage(image,'PNG',mapX+(mapW-dw)/2,mapY+(mapH-dh)/2,dw,dh); pdf.setDrawColor(38,61,66); pdf.rect(mapX,mapY,mapW,mapH)
   pdf.setTextColor(23,60,70); pdf.setFont('helvetica','bold'); pdf.setFontSize(13); pdf.text(record.layerTitle,205,44); pdf.setFontSize(11); pdf.text(pdf.splitTextToSize(`Classe: ${classValue(record)}`, 78).slice(0,2),205,53); pdf.text(`Tipo: ${geometryLabel(record.geometryType)}`,205,68); pdf.text(`Relação: ${String(record.attributes._relacao_espacial || 'interseção')}`,205,75)
   pdf.setFont('helvetica','normal'); pdf.setFontSize(9); let y=82; Object.entries(record.attributes).filter(([key])=>!key.startsWith('_')).slice(0,9).forEach(([key,value])=>{ pdf.text(`${key}: ${String(value).slice(0,65)}`,205,y); y+=7 })
-  pdf.setFillColor(230,57,70); pdf.rect(205,177,6,4,'F'); pdf.setTextColor(23,60,70); pdf.text(`Legenda — ${legendLabel(record).slice(0,55)}`,214,181)
+  const selectedRgb = cssRgb(mapColorForLegend(record, true)); pdf.setFillColor(selectedRgb[0], selectedRgb[1], selectedRgb[2]); pdf.rect(205,177,6,4,'F'); pdf.setTextColor(23,60,70); pdf.text(pdf.splitTextToSize(`Legenda — ${legendLabel(record)}`, 78),214,181)
   pdf.save(`interferencia-${slug(record.layerTitle)}-${slug(record.id)}.pdf`)
 }
 
@@ -165,10 +177,13 @@ const exportConsolidatedPdf = async (capture: CaptureResult, records: Interferen
   pdf.setTextColor(23, 60, 70); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.text('CONSOLIDADO', 205, 42)
   pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.text(`Interferências: ${records.length}`, 205, 52); pdf.text(`Classes: ${new Set(records.map(classValue)).size}`, 205, 59); pdf.text(`Camadas: ${new Set(records.map((record) => record.layerId)).size}`, 205, 66)
   let ly=82
-  Array.from(new Map(records.map((record) => [`${record.layerId}:${classValue(record)}`, record])).values()).forEach((record) => {
-    const color = symbolColor(record.symbol, '#E63946'); const rgb = color.match(/rgba?\\(([^)]+)\\)/)?.[1].split(',').map(Number) || [230,57,70]
-    pdf.setFillColor(rgb[0] || 230, rgb[1] || 57, rgb[2] || 70); pdf.rect(205, ly - 4, 6, 4, 'F')
-    pdf.setTextColor(23,60,70); pdf.setFontSize(8); pdf.text(`${legendLabel(record).slice(0, 54)} — ${records.filter((item) => legendLabel(item) === legendLabel(record)).length}`, 214, ly); ly += 8
+  const legendRecords = Array.from(new Map(records.map((record) => [legendLabel(record), record])).values())
+  legendRecords.forEach((record) => {
+    const lines = pdf.splitTextToSize(`${legendLabel(record)} — ${records.filter((item) => legendLabel(item) === legendLabel(record)).length}`, 76)
+    const rowHeight = Math.max(8, lines.length * 5)
+    if (ly + rowHeight > 190) { pdf.addPage(); header('Prancha consolidada — legenda completa'); ly = 38 }
+    const rgb = cssRgb(mapColorForLegend(record)); pdf.setFillColor(rgb[0], rgb[1], rgb[2]); pdf.rect(205, ly - 4, 6, 4, 'F')
+    pdf.setTextColor(23,60,70); pdf.setFontSize(8); pdf.text(lines, 214, ly); ly += rowHeight + 3
   })
   const rows = records.map((record, index) => ({ n:index+1, layer:record.layerTitle, klass:`${classValue(record)}${record.attributes._identificadores_agrupados ? ` — IDs: ${String(record.attributes._identificadores_agrupados)}` : ''}`, relation:String(record.attributes._relacao_espacial || 'interseção'), id:record.id }))
   let index=0
@@ -177,7 +192,9 @@ const exportConsolidatedPdf = async (capture: CaptureResult, records: Interferen
     pdf.setFillColor(23,60,70); pdf.rect(margin, 34, pageWidth-margin*2, 9, 'F'); pdf.setTextColor(255,255,255); pdf.setFont('helvetica','bold'); pdf.setFontSize(8); pdf.text('Nº', margin+3, 40); pdf.text('CAMADA', margin+18, 40); pdf.text('CLASSE DA INTERFERÊNCIA', margin+105, 40); pdf.text('RELAÇÃO', margin+220, 40); pdf.text('ID', margin+250, 40)
     let y=43
     for (let count=0; count<20 && index<rows.length; count++, index++) {
-      const row=rows[index]; pdf.setFillColor(count%2?245:234,248,247); pdf.rect(margin,y,pageWidth-margin*2,8,'F'); pdf.setTextColor(23,60,70); pdf.setFont('helvetica','normal'); pdf.setFontSize(8); pdf.text(String(row.n),margin+3,y+5); pdf.text(row.layer.slice(0,42),margin+18,y+5); pdf.text(row.klass.slice(0,58),margin+105,y+5); pdf.text(row.relation.slice(0,18),margin+220,y+5); pdf.text(row.id.slice(0,24),margin+250,y+5); y+=8
+      const row=rows[index]; const classLines = pdf.splitTextToSize(row.klass, 108).slice(0, 3); const rowHeight = Math.max(8, classLines.length * 5 + 3)
+      if (y + rowHeight > 195) { pdf.addPage(); header('Prancha consolidada — tabela de interferências (continuação)'); y = 43 }
+      pdf.setFillColor(count%2?245:234,248,247); pdf.rect(margin,y,pageWidth-margin*2,rowHeight,'F'); pdf.setTextColor(23,60,70); pdf.setFont('helvetica','normal'); pdf.setFontSize(8); pdf.text(String(row.n),margin+3,y+5); pdf.text(row.layer.slice(0,42),margin+18,y+5); pdf.text(classLines,margin+105,y+4); pdf.text(row.relation.slice(0,18),margin+220,y+5); pdf.text(row.id.slice(0,24),margin+250,y+5); y+=rowHeight
     }
   }
   pdf.save(`prancha-consolidada-interferencias-${new Date().toISOString().slice(0,10)}.pdf`)
@@ -198,7 +215,7 @@ const composeSummaryInfographic = async (capture: CaptureResult, records: Interf
   const panelHeight = 300 + layerRows * 66
   const cardsStart = panelY + panelHeight + 100
   const recordsHeight = Math.max(1, records.length) * (cardH + cardsGap)
-  const legendRows = Math.max(1, Math.ceil(Math.max(1, byLayer.length) / 2))
+  const legendRows = Math.max(1, records.reduce((total, record) => total + Math.ceil(legendLabel(record).length / 52), 0))
   const height = cardsStart + recordsHeight + 180 + legendRows * 34
   const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
   const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou o quadro-resumo.')
