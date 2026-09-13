@@ -102,18 +102,18 @@ const displayAttributes = (graphic: Graphic) => {
   return result
 }
 
-const symbolFor = (geometryType: InterferenceGeometry, selected = false) => {
+const symbolFor = (geometryType: InterferenceGeometry, selected = false, borderWidth = 3) => {
   const color = selected ? '#FFD166' : highlightColors[geometryType]
+  const width = selected ? Math.max(borderWidth + 2, 5) : borderWidth
   if (geometryType === 'point') {
-    return new SimpleMarkerSymbol({ style: 'circle', color, size: selected ? 15 : 10, outline: { color: '#FFFFFF', width: 1.5 } })
+    return new SimpleMarkerSymbol({ style: 'circle', color, size: selected ? 15 : 10, outline: { color: '#FFFFFF', width: Math.max(1, width / 2) } })
   }
-  if (geometryType === 'polyline') {
-    return new SimpleLineSymbol({ color, width: selected ? 5 : 3, style: 'solid' })
-  }
-  return new SimpleFillSymbol({ color: selected ? '#FFD166' : '#E63946', outline: new SimpleLineSymbol({ color, width: selected ? 5 : 3 }) })
+  if (geometryType === 'polyline') return new SimpleLineSymbol({ color, width, style: 'solid' })
+  return new SimpleFillSymbol({ color: selected ? '#FFD166' : '#E63946', outline: new SimpleLineSymbol({ color, width }) })
 }
 
-const normalized = (value: string) => value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+
+const normalized = (value: string) => value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
 const classFieldsForLayer = (title: string): string[][] => {
   const name = normalized(title)
   if (name.includes('relatorios_ugm') || name.includes('relatórios ugm')) return [['ugm_numero'], ['ugm_data']]
@@ -167,6 +167,7 @@ export async function createInterferenceRuntime(
   const studyLayer = new GraphicsLayer({ title: 'Área de estudo — temporária', listMode: 'hide' })
   const resultLayer = new GraphicsLayer({ title: 'Interferências — temporárias', listMode: 'hide' })
   const labelLayer = new GraphicsLayer({ title: 'Rótulos — temporários', listMode: 'hide' })
+  let currentBorderWidth = 3
   webmap.addMany([studyLayer, resultLayer, labelLayer])
 
   const layers: InterferenceLayerInfo[] = []
@@ -303,7 +304,8 @@ export async function createInterferenceRuntime(
   const highlightRecord = async (record: InterferenceRecord) => {
     resultLayer.graphics.forEach((graphic) => {
       const isSelected = graphic.attributes?.interferenceId === record.id
-      graphic.symbol = symbolFor(record.geometryType, isSelected)
+      graphic.attributes = { ...graphic.attributes, selected: isSelected }
+      graphic.symbol = symbolFor(record.geometryType, isSelected, currentBorderWidth)
     })
     labelLayer.removeAll()
     const geometry = record.graphic.geometry
@@ -320,7 +322,13 @@ export async function createInterferenceRuntime(
     // Selecionar no dropdown significa isolar: oculta camadas originais,
     // outras ocorrências e deixa somente o recorte escolhido no mapa.
     layers.forEach((entry) => { entry.layer.visible = false })
-    resultLayer.graphics.forEach((graphic) => { graphic.visible = graphic.attributes?.interferenceId === record.id })
+    resultLayer.graphics.forEach((graphic) => {
+      const selected = graphic.attributes?.interferenceId === record.id
+      graphic.visible = selected
+      graphic.attributes = { ...graphic.attributes, selected }
+      const type = graphic.geometry?.type === 'point' ? 'point' : graphic.geometry?.type === 'polyline' ? 'polyline' : 'polygon'
+      graphic.symbol = symbolFor(type, selected, currentBorderWidth)
+    })
     labelLayer.removeAll()
     const geometry = record.graphic.geometry
     if (geometry) {
@@ -378,13 +386,14 @@ export async function createInterferenceRuntime(
     })
   }
   const setBorderWidth = (width: number) => {
-    const value = Math.max(1, Math.min(12, width))
+    currentBorderWidth = Math.max(1, Math.min(12, width))
     resultLayer.graphics.forEach((graphic) => {
-      const symbol: any = graphic.symbol
-      if (symbol?.outline) symbol.outline.width = value
-      else if (symbol?.width !== undefined) symbol.width = value
+      const type = graphic.geometry?.type === 'point' ? 'point' : graphic.geometry?.type === 'polyline' ? 'polyline' : 'polygon'
+      const selected = Boolean(graphic.attributes?.selected)
+      graphic.symbol = symbolFor(type, selected, currentBorderWidth)
     })
   }
+
 
   const setLayerOpacity = (opacity: number) => {
     const value = Math.max(0.1, Math.min(1, opacity))
