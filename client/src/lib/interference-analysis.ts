@@ -114,36 +114,36 @@ const symbolFor = (geometryType: InterferenceGeometry, selected = false) => {
 }
 
 const normalized = (value: string) => value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-const classFieldsForLayer = (title: string): string[] => {
+const classFieldsForLayer = (title: string): string[][] => {
   const name = normalized(title)
-  if (name.includes('relatorios_ugm') || name.includes('relatórios ugm')) return ['ugm_numero', 'ugm_data']
-  if (name.includes('terracap_fundiario')) return ['situacao_fundiaria']
-  if (name.includes('imoveis_urbanos')) return ['condicao']
-  if (name.includes('puos')) return ['uso_luos']
-  if (name.includes('concessao_rural')) return ['processo_etr']
-  if (name.includes('outorga')) return ['nome']
-  if (name.includes('areas_regularizacao')) return ['nome', 'tipo']
-  if (name.includes('zoneamento_pdot')) return ['macrozona', 'zona']
-  if (name.includes('regioes_administrativas')) return ['nome']
-  if (name.includes('diretrizes_urbanisticas')) return ['zona']
-  if (name.includes('poligonais_de_estudo')) return ['nome', 'numero']
-  if (name.includes('proprios_gdf')) return ['destinacao']
-  if (name.includes('lotes_registrados')) return ['ciu']
-  if (name.includes('lote_luos')) return ['uos']
-  if (name.includes('lotes_rurais')) return ['tipo']
-  if (name.includes('zoneamento_apa')) return ['zona']
-  if (name.includes('onda')) return ['assunto']
+  if (name.includes('relatorios_ugm') || name.includes('relatórios ugm')) return [['ugm_numero'], ['ugm_data']]
+  if (name.includes('terracap_fundiario')) return [['situacao_fundiaria', 'situacao fundiaria']]
+  if (name.includes('imoveis_urbanos')) return [['condicao']]
+  if (name.includes('puos')) return [['uso_luos', 'uso luos']]
+  if (name.includes('concessao_rural')) return [['processo_etr', 'processo etr']]
+  if (name.includes('outorga')) return [['nome']]
+  if (name.includes('areas_regularizacao')) return [['nome'], ['tipo']]
+  if (name.includes('zoneamento_pdot')) return [['macrozona', 'dsc_macrozona', 'macro_zona'], ['zona', 'dsc_zona']]
+  if (name.includes('regioes_administrativas')) return [['nome']]
+  if (name.includes('diretrizes_urbanisticas')) return [['zona', 'dsc_zona']]
+  if (name.includes('poligonais_de_estudo')) return [['nome'], ['numero', 'num']]
+  if (name.includes('proprios_gdf')) return [['destinacao']]
+  if (name.includes('lotes_registrados')) return [['ciu']]
+  if (name.includes('lote_luos')) return [['uos', 'uso_luos']]
+  if (name.includes('lotes_rurais')) return [['tipo']]
+  if (name.includes('zoneamento_apa')) return [['zona', 'dsc_zona']]
+  if (name.includes('onda')) return [['assunto']]
   return []
 }
 const classLabelFor = (title: string, attributes: Record<string, unknown>) => {
   const fields = classFieldsForLayer(title)
-  const pairs = fields.map((field) => {
-    const found = Object.entries(attributes).find(([key]) => normalized(key) === normalized(field))
+  const pairs = fields.map((aliases) => {
+    const found = Object.entries(attributes).find(([key]) => aliases.some((alias) => normalized(key) === normalized(alias)))
     return found && String(found[1]).trim() ? String(found[1]).trim() : ''
   }).filter(Boolean)
   return pairs.join(' · ') || 'Classe não informada'
 }
-const compactLayer = (title: string) => { const name = normalized(title); return name.includes('lote') || name.includes('ocupacao') || name.includes('ocupação') }
+const compactLayer = (title: string) => { const name = normalized(title); return name.includes('lote') || name.includes('ocupac') }
 const identifierFields = ['ciu', 'uos', 'id', 'objectid', 'fid', 'codigo', 'numero']
 
 export async function createInterferenceRuntime(
@@ -250,9 +250,9 @@ export async function createInterferenceRuntime(
           // A unidade selecionável deve ser a feição lógica, não cada fragmento.
           const attrs = displayAttributes(graphic)
           const classLabel = classLabelFor(entry.title, attrs)
-          const aggregateByLayer = normalized(entry.title).includes('lotes_registrados') || normalized(entry.title).includes('ocupacao')
+          const aggregateByLayer = compactLayer(entry.title)
           const logicalKey = compactLayer(entry.title)
-            ? `${entry.id}:agrupado:${aggregateByLayer ? 'todos' : classLabel}`
+            ? `${entry.id}:agrupado:todos`
             : `${entry.id}:${objectId ?? JSON.stringify(attrs)}`
           const existing = byLogicalFeature.get(logicalKey)
           if (existing) {
@@ -264,13 +264,14 @@ export async function createInterferenceRuntime(
               if (compactLayer(entry.title)) {
                 const ids = new Set(String(existing.attributes._identificadores_agrupados || '').split(', ').filter(Boolean))
                 identifierFields.forEach((field) => { const value = Object.entries(attrs).find(([key]) => normalized(key) === field)?.[1]; if (value !== undefined && String(value).trim()) ids.add(String(value).trim()) })
+                if (objectId !== undefined && String(objectId).trim()) ids.add(String(objectId).trim())
                 existing.attributes._identificadores_agrupados = Array.from(ids).join(', ')
               }
               // Mantém uma única geometria desenhada para a feição lógica consolidada.
               resultLayer.graphics.toArray()
                 .filter((item) => item.attributes?.interferenceId === existing.id)
                 .forEach((item) => resultLayer.remove(item))
-              resultLayer.add(new Graphic({ geometry: merged as __esri.Geometry, symbol: existing.symbol as any, attributes: { interferenceId: existing.id, layerId: existing.layerId, layerTitle: existing.layerTitle, logicalKey } }))
+              resultLayer.add(new Graphic({ geometry: merged as __esri.Geometry, symbol: existing.symbol as any, attributes: { interferenceId: existing.id, layerId: existing.layerId, layerTitle: existing.layerTitle, logicalKey, mapLabel: `${existing.layerTitle} — ${String(existing.attributes._identificadores_agrupados || '')}` } }))
             }
             return
           }
@@ -282,11 +283,11 @@ export async function createInterferenceRuntime(
             graphic: clippedGraphic,
             symbol: sourceSymbol,
             involvedLayers: [{ id: entry.id, title: entry.title, symbol: sourceSymbol, geometryType: entry.geometryType }],
-            attributes: { ...attrs, _classe_legenda: aggregateByLayer ? entry.title : classLabel, _identificadores_agrupados: compactLayer(entry.title) ? identifierFields.map((field) => Object.entries(attrs).find(([key]) => normalized(key) === field)?.[1]).filter((value) => value !== undefined && String(value).trim()).map(String).join(', ') : '', _relacao_espacial: relation, _feicao_logica: objectId ?? 'sem OBJECTID' },
+            attributes: { ...attrs, _classe_legenda: aggregateByLayer ? entry.title : classLabel, _identificadores_agrupados: compactLayer(entry.title) ? [...identifierFields.map((field) => Object.entries(attrs).find(([key]) => normalized(key) === field)?.[1]).filter((value) => value !== undefined && String(value).trim()).map(String), objectId !== undefined ? String(objectId) : ''].filter(Boolean).join(', ') : '', _relacao_espacial: relation, _feicao_logica: objectId ?? 'sem OBJECTID' },
           }
           byLogicalFeature.set(logicalKey, record)
           records.push(record)
-          resultLayer.add(new Graphic({ geometry: clippedGeometry, symbol: sourceSymbol, attributes: { interferenceId: record.id, layerId: entry.id, layerTitle: entry.title, logicalKey } }))
+          resultLayer.add(new Graphic({ geometry: clippedGeometry, symbol: sourceSymbol, attributes: { interferenceId: record.id, layerId: entry.id, layerTitle: entry.title, logicalKey, mapLabel: `${entry.title} — ${String(record.attributes._identificadores_agrupados || '')}` } }))
         })
       } catch (error) {
         errors.push(`${entry.title}: ${error instanceof Error ? error.message : 'não foi possível consultar a camada'}`)
@@ -309,7 +310,7 @@ export async function createInterferenceRuntime(
     if (geometry) {
       labelLayer.add(new Graphic({
         geometry: geometry.type === 'point' ? geometry : geometry.extent?.center,
-        symbol: new TextSymbol({ text: record.layerTitle, color: '#1D3557', haloColor: '#FFFFFF', haloSize: 2, font: { size: 10, weight: 'bold' } }),
+        symbol: new TextSymbol({ text: `${String(record.attributes._classe_legenda || record.layerTitle)}${record.attributes._identificadores_agrupados ? ` — IDs: ${String(record.attributes._identificadores_agrupados).slice(0, 120)}` : ''}`, color: '#1D3557', haloColor: '#FFFFFF', haloSize: 2, font: { size: 10, weight: 'bold' } }),
       }))
       await view.goTo(geometry, { duration: 450 })
     }
@@ -325,7 +326,7 @@ export async function createInterferenceRuntime(
     if (geometry) {
       labelLayer.add(new Graphic({
         geometry: geometry.type === 'point' ? geometry : geometry.extent?.center,
-        symbol: new TextSymbol({ text: record.layerTitle, color: '#1D3557', haloColor: '#FFFFFF', haloSize: 2, font: { size: 10, weight: 'bold' } }),
+        symbol: new TextSymbol({ text: `${String(record.attributes._classe_legenda || record.layerTitle)}${record.attributes._identificadores_agrupados ? ` — IDs: ${String(record.attributes._identificadores_agrupados).slice(0, 120)}` : ''}`, color: '#1D3557', haloColor: '#FFFFFF', haloSize: 2, font: { size: 10, weight: 'bold' } }),
       }))
       await view.goTo(geometry, { duration: 450 })
     }

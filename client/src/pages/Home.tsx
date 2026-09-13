@@ -169,7 +169,7 @@ const exportConsolidatedPdf = async (capture: CaptureResult, records: Interferen
     pdf.setFillColor(rgb[0] || 230, rgb[1] || 57, rgb[2] || 70); pdf.rect(205, ly - 4, 6, 4, 'F')
     pdf.setTextColor(23,60,70); pdf.setFontSize(8); pdf.text(`${classValue(record).slice(0, 40)} — ${records.filter((item) => classValue(item) === classValue(record)).length}`, 214, ly); ly += 8
   })
-  const rows = records.map((record, index) => ({ n:index+1, layer:record.layerTitle, klass:classValue(record), relation:String(record.attributes._relacao_espacial || 'interseção'), id:record.id }))
+  const rows = records.map((record, index) => ({ n:index+1, layer:record.layerTitle, klass:`${classValue(record)}${record.attributes._identificadores_agrupados ? ` — IDs: ${String(record.attributes._identificadores_agrupados)}` : ''}`, relation:String(record.attributes._relacao_espacial || 'interseção'), id:record.id }))
   let index=0
   while (index < rows.length) {
     pdf.addPage(); header('Prancha consolidada — tabela de interferências')
