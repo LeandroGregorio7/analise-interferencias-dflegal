@@ -322,7 +322,7 @@ export async function createInterferenceRuntime(
   const isolateRecord = async (record: InterferenceRecord) => {
     // Selecionar no dropdown significa isolar: oculta camadas originais,
     // outras ocorrências e deixa somente o recorte escolhido no mapa.
-    layers.forEach((entry) => { entry.layer.visible = false })
+    webmap.allLayers.forEach((layer) => { if (layer !== studyLayer && layer !== resultLayer && layer !== labelLayer) layer.visible = false })
     resultLayer.graphics.forEach((graphic) => {
       const selected = graphic.attributes?.interferenceId === record.id
       graphic.visible = selected
@@ -342,7 +342,8 @@ export async function createInterferenceRuntime(
   }
 
   const captureIsolated = async (record?: InterferenceRecord) => {
-    const featureLayers = layers.map((entry) => ({ layer: entry.layer, visible: entry.layer.visible, opacity: entry.layer.opacity }))
+    const operationalLayers = webmap.allLayers.toArray().filter((layer) => layer !== studyLayer && layer !== resultLayer && layer !== labelLayer)
+    const featureLayers = operationalLayers.map((layer) => ({ layer, visible: layer.visible, opacity: layer.opacity }))
     const resultGraphics = resultLayer.graphics.toArray().map((graphic) => ({ graphic, visible: graphic.visible }))
     const studyVisible = studyLayer.visible
     const labelsVisible = labelLayer.visible

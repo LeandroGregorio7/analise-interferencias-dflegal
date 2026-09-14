@@ -93,6 +93,18 @@ const drawCoordinateGrid = (context: CanvasRenderingContext2D, capture: CaptureR
   context.restore()
 }
 
+const drawPdfCoordinateGrid = (pdf: jsPDF, capture: CaptureResult, mapX: number, mapY: number, mapW: number, mapH: number) => {
+  if (!capture.extent) return
+  const { xmin, ymin, xmax, ymax } = capture.extent; const gridCount = 5
+  pdf.setDrawColor(23, 60, 70); pdf.setTextColor(23, 60, 70); pdf.setLineWidth(0.15); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6)
+  for (let i = 0; i <= gridCount; i += 1) {
+    const px = mapX + (mapW * i) / gridCount; const py = mapY + (mapH * i) / gridCount
+    pdf.line(px, mapY, px, mapY + mapH); pdf.line(mapX, py, mapX + mapW, py)
+    pdf.text(String(Math.round(xmin + ((xmax - xmin) * i) / gridCount)), px, mapY - 2, { align: 'center' })
+    pdf.text(String(Math.round(ymax - ((ymax - ymin) * i) / gridCount)), mapX - 2, py + 2, { align: 'right' })
+  }
+}
+
 const drawBoardChrome = (context: CanvasRenderingContext2D, title: string, subtitle: string, width: number, height: number) => {
   context.fillStyle = '#F4F0E8'; context.fillRect(0, 0, width, height)
   context.strokeStyle = '#263D42'; context.lineWidth = 5; context.strokeRect(18, 18, width - 36, height - 36)
@@ -152,7 +164,7 @@ const exportIndividualPdf = async (capture: CaptureResult, record: InterferenceR
   const w = 297; const h = 210; const m = 12
   pdf.setFillColor(11,48,58); pdf.rect(0,0,w,25,'F'); pdf.setTextColor(242,177,52); pdf.setFont('helvetica','bold'); pdf.setFontSize(15); pdf.text('DF LEGAL · ANÁLISE DE INTERFERÊNCIAS',m,11); pdf.setTextColor(255,255,255); pdf.setFontSize(10); pdf.text('Interferência selecionada',m,19)
   const mapW=178, mapH=150, mapX=m, mapY=35; const ratio=Math.min(mapW/image.width,mapH/image.height); const dw=image.width*ratio, dh=image.height*ratio
-  pdf.addImage(image,'PNG',mapX+(mapW-dw)/2,mapY+(mapH-dh)/2,dw,dh); pdf.setDrawColor(38,61,66); pdf.rect(mapX,mapY,mapW,mapH)
+  const imageX = mapX+(mapW-dw)/2; const imageY = mapY+(mapH-dh)/2; pdf.addImage(image,'PNG',imageX,imageY,dw,dh); drawPdfCoordinateGrid(pdf, capture, imageX, imageY, dw, dh); pdf.setDrawColor(38,61,66); pdf.rect(imageX,imageY,dw,dh)
   pdf.setTextColor(23,60,70); pdf.setFont('helvetica','bold'); pdf.setFontSize(13); pdf.text(record.layerTitle,205,44); pdf.setFontSize(11); pdf.text(pdf.splitTextToSize(`Classe: ${classValue(record)}`, 78).slice(0,2),205,53); pdf.text(`Tipo: ${geometryLabel(record.geometryType)}`,205,68); pdf.text(`Relação: ${String(record.attributes._relacao_espacial || 'interseção')}`,205,75)
   pdf.setFont('helvetica','normal'); pdf.setFontSize(9); let y=82; Object.entries(record.attributes).filter(([key])=>!key.startsWith('_')).slice(0,9).forEach(([key,value])=>{ pdf.text(`${key}: ${String(value).slice(0,65)}`,205,y); y+=7 })
   const selectedRgb = cssRgb(mapColorForLegend(record, true)); pdf.setFillColor(selectedRgb[0], selectedRgb[1], selectedRgb[2]); pdf.rect(205,177,6,4,'F'); pdf.setTextColor(23,60,70); pdf.text(pdf.splitTextToSize(`Legenda — ${legendLabel(record)}`, 78),214,181)
@@ -172,8 +184,10 @@ const exportConsolidatedPdf = async (capture: CaptureResult, records: Interferen
   const mapX = margin; const mapY = 34; const mapW = 180; const mapH = 155
   pdf.setFillColor(248, 248, 245); pdf.rect(mapX - 3, mapY - 3, mapW + 6, mapH + 6, 'F')
   const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio
-  pdf.addImage(image, 'PNG', mapX + (mapW - drawW) / 2, mapY + (mapH - drawH) / 2, drawW, drawH)
-  pdf.setDrawColor(38, 61, 66); pdf.rect(mapX, mapY, mapW, mapH)
+  const imageX = mapX + (mapW - drawW) / 2; const imageY = mapY + (mapH - drawH) / 2
+  pdf.addImage(image, 'PNG', imageX, imageY, drawW, drawH)
+  drawPdfCoordinateGrid(pdf, capture, imageX, imageY, drawW, drawH)
+  pdf.setDrawColor(38, 61, 66); pdf.rect(imageX, imageY, drawW, drawH)
   pdf.setTextColor(23, 60, 70); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.text('CONSOLIDADO', 205, 42)
   pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.text(`Interferências: ${records.length}`, 205, 52); pdf.text(`Classes: ${new Set(records.map(classValue)).size}`, 205, 59); pdf.text(`Camadas: ${new Set(records.map((record) => record.layerId)).size}`, 205, 66)
   let ly=82
@@ -398,6 +412,8 @@ export default function Home() {
 
   const selectRecord = async (record: InterferenceRecord) => {
     setSelectedId(record.id)
+    setSelectedLayerId(null)
+    setActiveLayerIds([])
     await runtimeRef.current?.isolateRecord(record)
   }
 
