@@ -116,23 +116,16 @@ const drawBoardChrome = (context: CanvasRenderingContext2D, title: string, subti
 }
 
 const drawLegend = (context: CanvasRenderingContext2D, records: InterferenceRecord[], x: number, y: number, maxWidth: number) => {
-  const entries = Array.from(new Map(records.map((record) => [legendLabel(record), record])).values())
+  const entries = records.flatMap((record) => classEntriesFor(record).map((entry) => ({ record, entry })))
   context.fillStyle = '#173C46'; context.font = '700 18px Arial'; context.fillText('LEGENDA DAS CLASSES DAS INTERFERÊNCIAS', x, y)
-  let legendX = x; let legendY = y + 30; const rowHeight = 42; const gap = 24
-  entries.forEach((record) => {
-    const label = legendLabel(record); const words = label.split(' '); const lines: string[] = []; let line = ''
-    words.forEach((word) => { const candidate = line ? `${line} ${word}` : word; if (context.measureText(candidate).width > maxWidth - 42 && line) { lines.push(line); line = word } else line = candidate })
-    if (line) lines.push(line)
+  let legendX = x; let legendY = y + 30
+  entries.forEach(({ record, entry }) => {
+    const label = `${record.layerTitle} — ${entry.label}`; const words = label.split(' '); const lines: string[] = []; let line = ''
+    words.forEach((word) => { const candidate = line ? `${line} ${word}` : word; if (context.measureText(candidate).width > maxWidth - 42 && line) { lines.push(line); line = word } else line = candidate }); if (line) lines.push(line)
     const itemWidth = Math.min(maxWidth, Math.max(260, context.measureText(lines[0] || label).width + 48))
-    if (legendX !== x && legendX + itemWidth > x + maxWidth) { legendX = x; legendY += rowHeight * Math.max(1, lines.length) + gap }
-    const entries = classEntriesFor(record)
-    entries.forEach((entry, entryIndex) => {
-      const entryLabel = `${record.layerTitle} — ${entry.label}`; const entryWords = entryLabel.split(' '); const entryLines: string[] = []; let entryLine = ''
-      entryWords.forEach((word) => { const candidate = entryLine ? `${entryLine} ${word}` : word; if (context.measureText(candidate).width > maxWidth - 42 && entryLine) { entryLines.push(entryLine); entryLine = word } else entryLine = candidate }); if (entryLine) entryLines.push(entryLine)
-      const swatch = symbolColor(entry.symbol, mapColorForLegend(record)); context.fillStyle = swatch; context.fillRect(legendX, legendY - 15, 24, 16); context.strokeStyle = '#526166'; context.lineWidth = 1; context.strokeRect(legendX, legendY - 15, 24, 16)
-      context.fillStyle = '#526166'; context.font = '600 16px Arial'; entryLines.forEach((text, index) => context.fillText(text, legendX + 34, legendY + index * 20)); legendY += Math.max(1, entryLines.length) * 20 + (entryIndex < entries.length - 1 ? 6 : 0)
-    })
-    legendX += itemWidth
+    if (legendX !== x && legendX + itemWidth > x + maxWidth) { legendX = x; legendY += 48 }
+    const swatch = symbolColor(entry.symbol, mapColorForLegend(record)); context.fillStyle = swatch; context.fillRect(legendX, legendY - 15, 24, 16); context.strokeStyle = '#526166'; context.lineWidth = 1; context.strokeRect(legendX, legendY - 15, 24, 16)
+    context.fillStyle = '#526166'; context.font = '600 16px Arial'; lines.forEach((text, index) => context.fillText(text, legendX + 34, legendY + index * 20)); legendX += itemWidth
   })
   return legendY + 28
 }
@@ -173,7 +166,8 @@ const exportIndividualPdf = async (capture: CaptureResult, record: InterferenceR
   const imageX = mapX+(mapW-dw)/2; const imageY = mapY+(mapH-dh)/2; pdf.addImage(image,'PNG',imageX,imageY,dw,dh); drawPdfCoordinateGrid(pdf, capture, imageX, imageY, dw, dh); pdf.setDrawColor(38,61,66); pdf.rect(imageX,imageY,dw,dh)
   pdf.setTextColor(23,60,70); pdf.setFont('helvetica','bold'); pdf.setFontSize(13); pdf.text(record.layerTitle,205,44); pdf.setFontSize(11); pdf.text(pdf.splitTextToSize(`Classe: ${classValue(record)}`, 78).slice(0,2),205,53); pdf.text(`Tipo: ${geometryLabel(record.geometryType)}`,205,68); pdf.text(`Relação: ${String(record.attributes._relacao_espacial || 'interseção')}`,205,75)
   pdf.setFont('helvetica','normal'); pdf.setFontSize(9); let y=82; Object.entries(record.attributes).filter(([key])=>!key.startsWith('_')).slice(0,9).forEach(([key,value])=>{ pdf.text(`${key}: ${String(value).slice(0,65)}`,205,y); y+=7 })
-  const selectedRgb = cssRgb(mapColorForLegend(record, true)); pdf.setFillColor(selectedRgb[0], selectedRgb[1], selectedRgb[2]); pdf.rect(205,177,6,4,'F'); pdf.setTextColor(23,60,70); pdf.text(pdf.splitTextToSize(`Legenda — ${legendLabel(record)}`, 78),214,181)
+  let legendY = 177
+  classEntriesFor(record).forEach((entry) => { const rgb = cssRgb(symbolColor(entry.symbol, mapColorForLegend(record))); pdf.setFillColor(rgb[0], rgb[1], rgb[2]); pdf.rect(205,legendY-4,6,4,'F'); pdf.setTextColor(23,60,70); pdf.text(pdf.splitTextToSize(`Legenda — ${record.layerTitle} — ${entry.label}`, 78),214,legendY); legendY += 7 })
   pdf.save(`interferencia-${slug(record.layerTitle)}-${slug(record.id)}.pdf`)
 }
 
@@ -197,12 +191,11 @@ const exportConsolidatedPdf = async (capture: CaptureResult, records: Interferen
   pdf.setTextColor(23, 60, 70); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.text('CONSOLIDADO', 205, 42)
   pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.text(`Interferências: ${records.length}`, 205, 52); pdf.text(`Classes: ${new Set(records.map(classValue)).size}`, 205, 59); pdf.text(`Camadas: ${new Set(records.map((record) => record.layerId)).size}`, 205, 66)
   let ly=82
-  const legendRecords = Array.from(new Map(records.map((record) => [legendLabel(record), record])).values())
-  legendRecords.forEach((record) => {
-    const lines = pdf.splitTextToSize(`${legendLabel(record)} — ${records.filter((item) => legendLabel(item) === legendLabel(record)).length}`, 76)
+  records.flatMap((record) => classEntriesFor(record).map((entry) => ({ record, entry }))).forEach(({ record, entry }) => {
+    const lines = pdf.splitTextToSize(`${record.layerTitle} — ${entry.label}`, 76)
     const rowHeight = Math.max(8, lines.length * 5)
     if (ly + rowHeight > 190) { pdf.addPage(); header('Prancha consolidada — legenda completa'); ly = 38 }
-    const rgb = cssRgb(mapColorForLegend(record)); pdf.setFillColor(rgb[0], rgb[1], rgb[2]); pdf.rect(205, ly - 4, 6, 4, 'F')
+    const rgb = cssRgb(symbolColor(entry.symbol, mapColorForLegend(record))); pdf.setFillColor(rgb[0], rgb[1], rgb[2]); pdf.rect(205, ly - 4, 6, 4, 'F')
     pdf.setTextColor(23,60,70); pdf.setFontSize(8); pdf.text(lines, 214, ly); ly += rowHeight + 3
   })
   const rows = records.map((record, index) => ({ n:index+1, layer:record.layerTitle, klass:`${classValue(record)}${record.attributes._identificadores_agrupados ? ` — IDs: ${String(record.attributes._identificadores_agrupados)}` : ''}`, relation:String(record.attributes._relacao_espacial || 'interseção'), id:record.id }))

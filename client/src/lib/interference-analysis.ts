@@ -94,6 +94,8 @@ const geometryTypeOf = (layer: FeatureLayer): InterferenceGeometry | undefined =
   return undefined
 }
 
+const isBackgroundLayer = (title: string) => /ortofoto|ortho|imagem|sat[eé]lite|basemap|background|fundo|mapa\s*base|street\s*map|refer[eê]ncia/i.test(title)
+
 const displayAttributes = (graphic: Graphic) => {
   const result: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(graphic.attributes || {})) {
@@ -178,7 +180,7 @@ export async function createInterferenceRuntime(
     if (item.type !== 'feature') return
     const layer = item as FeatureLayer
     const geometryType = geometryTypeOf(layer)
-    if (!geometryType) return
+    if (!geometryType || isBackgroundLayer(layer.title || layer.id)) return
     layers.push({ id: layer.id, title: layer.title || layer.id, visible: layer.visible, geometryType, layer })
   })
   await Promise.all(layers.map(async (entry) => {
