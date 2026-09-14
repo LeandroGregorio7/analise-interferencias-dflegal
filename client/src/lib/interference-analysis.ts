@@ -58,6 +58,7 @@ export interface InterferenceRuntime {
   captureMap: () => Promise<CaptureResult>
   captureSummary: () => Promise<CaptureResult>
   setLayerSelection: (layerId: string | null) => void
+  setLayerVisibility: (layerId: string, visible: boolean) => void
   setLayerOpacity: (opacity: number) => void
   setBorderWidth: (width: number) => void
   clearAnalysis: () => void
@@ -332,7 +333,8 @@ export async function createInterferenceRuntime(
   const isolateRecord = async (record: InterferenceRecord) => {
     // Selecionar no dropdown significa isolar: oculta camadas originais,
     // outras ocorrências e deixa somente o recorte escolhido no mapa.
-    webmap.allLayers.forEach((layer) => { if (layer !== studyLayer && layer !== resultLayer && layer !== labelLayer) layer.visible = false })
+    // Preserva mapa-base/background e grupos operacionais; isola somente as FeatureLayers analisadas.
+    layers.forEach((entry) => { entry.layer.visible = false })
     resultLayer.graphics.forEach((graphic) => {
       const selected = graphic.attributes?.interferenceId === record.id
       graphic.visible = selected
@@ -397,6 +399,11 @@ export async function createInterferenceRuntime(
       graphic.visible = layerId === null || graphic.attributes?.layerId === layerId || graphic.attributes?.interferenceId?.startsWith(`${layerId}-`)
     })
   }
+  const setLayerVisibility = (layerId: string, visible: boolean) => {
+    const entry = layers.find((item) => item.id === layerId)
+    if (entry) entry.layer.visible = visible
+  }
+
   const setBorderWidth = (width: number) => {
     currentBorderWidth = Math.max(1, Math.min(12, width))
     resultLayer.graphics.forEach((graphic) => {
@@ -425,6 +432,7 @@ export async function createInterferenceRuntime(
     captureMap,
     captureSummary,
     setLayerSelection,
+    setLayerVisibility,
     setLayerOpacity,
     setBorderWidth,
     clearAnalysis: () => { studyLayer.removeAll(); resultLayer.removeAll(); labelLayer.removeAll() },
