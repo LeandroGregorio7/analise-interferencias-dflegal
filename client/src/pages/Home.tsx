@@ -34,6 +34,7 @@ const downloadDataUrl = (dataUrl: string, filename: string) => {
 }
 const geometryLabel = (type?: string) => type === 'point' ? 'Ponto' : type === 'polyline' ? 'Linha' : 'Polígono'
 const legendLabel = (record: InterferenceRecord) => `${record.layerTitle} — ${classValue(record)}`
+const classEntriesFor = (record: InterferenceRecord) => record.classEntries?.length ? record.classEntries : [{ label: classValue(record), symbol: record.symbol }]
 const symbolColor = (symbol?: __esri.Symbol, fallback = '#E63946') => {
   const candidate = symbol as any
   const colors = [candidate?.color, candidate?.outline?.color]
@@ -124,8 +125,13 @@ const drawLegend = (context: CanvasRenderingContext2D, records: InterferenceReco
     if (line) lines.push(line)
     const itemWidth = Math.min(maxWidth, Math.max(260, context.measureText(lines[0] || label).width + 48))
     if (legendX !== x && legendX + itemWidth > x + maxWidth) { legendX = x; legendY += rowHeight * Math.max(1, lines.length) + gap }
-    const swatch = mapColorForLegend(record); context.fillStyle = swatch; context.fillRect(legendX, legendY - 15, 24, 16); context.strokeStyle = '#526166'; context.lineWidth = 1; context.strokeRect(legendX, legendY - 15, 24, 16)
-    context.fillStyle = '#526166'; context.font = '600 16px Arial'; lines.forEach((text, index) => context.fillText(text, legendX + 34, legendY + index * 20))
+    const entries = classEntriesFor(record)
+    entries.forEach((entry, entryIndex) => {
+      const entryLabel = `${record.layerTitle} — ${entry.label}`; const entryWords = entryLabel.split(' '); const entryLines: string[] = []; let entryLine = ''
+      entryWords.forEach((word) => { const candidate = entryLine ? `${entryLine} ${word}` : word; if (context.measureText(candidate).width > maxWidth - 42 && entryLine) { entryLines.push(entryLine); entryLine = word } else entryLine = candidate }); if (entryLine) entryLines.push(entryLine)
+      const swatch = symbolColor(entry.symbol, mapColorForLegend(record)); context.fillStyle = swatch; context.fillRect(legendX, legendY - 15, 24, 16); context.strokeStyle = '#526166'; context.lineWidth = 1; context.strokeRect(legendX, legendY - 15, 24, 16)
+      context.fillStyle = '#526166'; context.font = '600 16px Arial'; entryLines.forEach((text, index) => context.fillText(text, legendX + 34, legendY + index * 20)); legendY += Math.max(1, entryLines.length) * 20 + (entryIndex < entries.length - 1 ? 6 : 0)
+    })
     legendX += itemWidth
   })
   return legendY + 28
@@ -273,7 +279,7 @@ const composeSummaryInfographic = async (capture: CaptureResult, records: Interf
 }
 
 const classValue = (record: InterferenceRecord) => {
-  const runtimeClass = record.attributes._classe_legenda
+  const runtimeClass = record.attributes._classes_legenda || record.attributes._classe_legenda
   if (runtimeClass && String(runtimeClass).trim() && runtimeClass !== 'Classe não informada') return String(runtimeClass)
   const preferred = ['dsc_macrozone', 'dsc_macrozona', 'dsc_zona', 'nom_nome', 'nome', 'classe', 'classificacao', 'category', 'tipo']
   const entries = Object.entries(record.attributes).filter(([key, value]) => value !== null && value !== undefined && String(value).trim() && !key.startsWith('_'))

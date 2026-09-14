@@ -30,6 +30,7 @@ export interface InterferenceRecord {
   attributes: Record<string, unknown>
   symbol?: __esri.Symbol
   involvedLayers?: Array<{ id: string; title: string; symbol?: __esri.Symbol; geometryType?: InterferenceGeometry }>
+  classEntries?: Array<{ label: string; symbol?: __esri.Symbol; geometry?: __esri.Geometry }>
 }
 
 export interface CaptureResult {
@@ -253,9 +254,9 @@ export async function createInterferenceRuntime(
           const attrs = displayAttributes(graphic)
           const classLabel = classLabelFor(entry.title, attrs)
           const aggregateByLayer = compactLayer(entry.title)
-          const logicalKey = compactLayer(entry.title)
-            ? `${entry.id}:agrupado:todos`
-            : `${entry.id}:${objectId ?? JSON.stringify(attrs)}`
+          // Uma camada representa uma única ocorrência lógica na busca.
+          // Classes distintas permanecem separadas apenas na legenda/simbologia.
+          const logicalKey = `${entry.id}:camada`
           const existing = byLogicalFeature.get(logicalKey)
           if (existing) {
             const merged = geometryEngine.union([existing.graphic.geometry!, clippedGeometry])
@@ -263,6 +264,14 @@ export async function createInterferenceRuntime(
               existing.graphic.geometry = merged as __esri.Geometry
               const previousRelation = String(existing.attributes._relacao_espacial || '')
               existing.attributes._relacao_espacial = previousRelation === relation ? relation : 'interseção'
+              const classEntries = existing.classEntries || []
+              if (!classEntries.some((item) => item.label === classLabel)) classEntries.push({ label: classLabel, symbol: sourceSymbol, geometry: clippedGeometry })
+              else {
+                const item = classEntries.find((entry) => entry.label === classLabel)
+                if (item) item.geometry = geometryEngine.union([item.geometry! as __esri.GeometryUnion, clippedGeometry as __esri.GeometryUnion]) as __esri.Geometry
+              }
+              existing.classEntries = classEntries
+              existing.attributes._classes_legenda = classEntries.map((item) => item.label).join(' · ')
               if (compactLayer(entry.title)) {
                 const ids = new Set(String(existing.attributes._identificadores_agrupados || '').split(', ').filter(Boolean))
                 identifierFields.forEach((field) => { const value = Object.entries(attrs).find(([key]) => normalized(key) === field)?.[1]; if (value !== undefined && String(value).trim()) ids.add(String(value).trim()) })
@@ -273,7 +282,7 @@ export async function createInterferenceRuntime(
               resultLayer.graphics.toArray()
                 .filter((item) => item.attributes?.interferenceId === existing.id)
                 .forEach((item) => resultLayer.remove(item))
-              resultLayer.add(new Graphic({ geometry: merged as __esri.Geometry, symbol: existing.symbol as any, attributes: { interferenceId: existing.id, layerId: existing.layerId, layerTitle: existing.layerTitle, logicalKey, mapLabel: `${existing.layerTitle} — ${String(existing.attributes._identificadores_agrupados || '')}` } }))
+              classEntries.forEach((classEntry) => resultLayer.add(new Graphic({ geometry: classEntry.geometry, symbol: classEntry.symbol as any, attributes: { interferenceId: existing.id, layerId: existing.layerId, layerTitle: existing.layerTitle, logicalKey, classLabel: classEntry.label, classEntries, mapLabel: `${existing.layerTitle} — ${classEntry.label}` } })))
             }
             return
           }
@@ -284,12 +293,13 @@ export async function createInterferenceRuntime(
             geometryType: entry.geometryType!,
             graphic: clippedGraphic,
             symbol: sourceSymbol,
+            classEntries: [{ label: classLabel, symbol: sourceSymbol, geometry: clippedGeometry }],
             involvedLayers: [{ id: entry.id, title: entry.title, symbol: sourceSymbol, geometryType: entry.geometryType }],
-            attributes: { ...attrs, _classe_legenda: classLabel, _identificadores_agrupados: compactLayer(entry.title) ? [...identifierFields.map((field) => Object.entries(attrs).find(([key]) => normalized(key) === field)?.[1]).filter((value) => value !== undefined && String(value).trim()).map(String), objectId !== undefined ? String(objectId) : ''].filter(Boolean).join(', ') : '', _relacao_espacial: relation, _feicao_logica: objectId ?? 'sem OBJECTID' },
+            attributes: { ...attrs, _classe_legenda: classLabel, _classes_legenda: classLabel, _identificadores_agrupados: compactLayer(entry.title) ? [...identifierFields.map((field) => Object.entries(attrs).find(([key]) => normalized(key) === field)?.[1]).filter((value) => value !== undefined && String(value).trim()).map(String), objectId !== undefined ? String(objectId) : ''].filter(Boolean).join(', ') : '', _relacao_espacial: relation, _feicao_logica: objectId ?? 'sem OBJECTID' },
           }
           byLogicalFeature.set(logicalKey, record)
           records.push(record)
-          resultLayer.add(new Graphic({ geometry: clippedGeometry, symbol: sourceSymbol, attributes: { interferenceId: record.id, layerId: entry.id, layerTitle: entry.title, logicalKey, mapLabel: `${entry.title} — ${String(record.attributes._identificadores_agrupados || '')}` } }))
+          resultLayer.add(new Graphic({ geometry: clippedGeometry, symbol: sourceSymbol, attributes: { interferenceId: record.id, layerId: entry.id, layerTitle: entry.title, logicalKey, classLabel, classEntries: record.classEntries, mapLabel: `${entry.title} — ${classLabel}` } }))
         })
       } catch (error) {
         errors.push(`${entry.title}: ${error instanceof Error ? error.message : 'não foi possível consultar a camada'}`)
