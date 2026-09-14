@@ -184,6 +184,7 @@ export async function createInterferenceRuntime(
   await Promise.all(layers.map(async (entry) => {
     try { await entry.layer.load() } catch { /* erro individual é informado durante a análise */ }
   }))
+  const preservedLayerVisibility = new Map(webmap.allLayers.toArray().map((layer) => [layer.id, layer.visible]))
 
   const sketch = new SketchViewModel({
     view,
@@ -283,7 +284,7 @@ export async function createInterferenceRuntime(
               resultLayer.graphics.toArray()
                 .filter((item) => item.attributes?.interferenceId === existing.id)
                 .forEach((item) => resultLayer.remove(item))
-              classEntries.forEach((classEntry) => resultLayer.add(new Graphic({ geometry: classEntry.geometry, symbol: classEntry.symbol as any, attributes: { interferenceId: existing.id, layerId: existing.layerId, layerTitle: existing.layerTitle, logicalKey, classLabel: classEntry.label, classEntries, mapLabel: `${existing.layerTitle} — ${classEntry.label}` } })))
+              classEntries.forEach((classEntry) => resultLayer.add(new Graphic({ geometry: classEntry.geometry, symbol: classEntry.symbol as any, attributes: { interferenceId: existing.id, layerId: existing.layerId, layerTitle: existing.layerTitle, logicalKey, classLabel: classEntry.label, classEntries, sourceSymbol: classEntry.symbol, mapLabel: `${existing.layerTitle} — ${classEntry.label}` } })))
             }
             return
           }
@@ -300,7 +301,7 @@ export async function createInterferenceRuntime(
           }
           byLogicalFeature.set(logicalKey, record)
           records.push(record)
-          resultLayer.add(new Graphic({ geometry: clippedGeometry, symbol: sourceSymbol, attributes: { interferenceId: record.id, layerId: entry.id, layerTitle: entry.title, logicalKey, classLabel, classEntries: record.classEntries, mapLabel: `${entry.title} — ${classLabel}` } }))
+          resultLayer.add(new Graphic({ geometry: clippedGeometry, symbol: sourceSymbol, attributes: { interferenceId: record.id, layerId: entry.id, layerTitle: entry.title, logicalKey, classLabel, classEntries: record.classEntries, sourceSymbol, mapLabel: `${entry.title} — ${classLabel}` } }))
         })
       } catch (error) {
         errors.push(`${entry.title}: ${error instanceof Error ? error.message : 'não foi possível consultar a camada'}`)
@@ -317,7 +318,8 @@ export async function createInterferenceRuntime(
     resultLayer.graphics.forEach((graphic) => {
       const isSelected = graphic.attributes?.interferenceId === record.id
       graphic.attributes = { ...graphic.attributes, selected: isSelected }
-      graphic.symbol = symbolFor(record.geometryType, isSelected, currentBorderWidth)
+      // Preserva a simbologia do Web Map; a legenda usa exatamente este símbolo.
+      graphic.symbol = graphic.attributes?.sourceSymbol || graphic.symbol
     })
     labelLayer.removeAll()
     const geometry = record.graphic.geometry
@@ -335,12 +337,15 @@ export async function createInterferenceRuntime(
     // outras ocorrências e deixa somente o recorte escolhido no mapa.
     // Preserva mapa-base/background e grupos operacionais; isola somente as FeatureLayers analisadas.
     layers.forEach((entry) => { entry.layer.visible = false })
+    webmap.allLayers.forEach((layer) => {
+      if (!layers.some((entry) => entry.id === layer.id)) layer.visible = preservedLayerVisibility.get(layer.id) ?? true
+    })
     resultLayer.graphics.forEach((graphic) => {
       const selected = graphic.attributes?.interferenceId === record.id
       graphic.visible = selected
       graphic.attributes = { ...graphic.attributes, selected }
       const type = graphic.geometry?.type === 'point' ? 'point' : graphic.geometry?.type === 'polyline' ? 'polyline' : 'polygon'
-      graphic.symbol = symbolFor(type, selected, currentBorderWidth)
+      graphic.symbol = graphic.attributes?.sourceSymbol || graphic.symbol
     })
     labelLayer.removeAll()
     const geometry = record.graphic.geometry
@@ -354,8 +359,9 @@ export async function createInterferenceRuntime(
   }
 
   const captureIsolated = async (record?: InterferenceRecord) => {
-    const operationalLayers = webmap.allLayers.toArray().filter((layer) => layer !== studyLayer && layer !== resultLayer && layer !== labelLayer)
-    const featureLayers = operationalLayers.map((layer) => ({ layer, visible: layer.visible, opacity: layer.opacity }))
+    // Somente as camadas analisadas são temporariamente ocultadas. O mapa-base
+    // e as camadas operacionais não analisadas permanecem no background.
+    const featureLayers = layers.map((entry) => ({ layer: entry.layer, visible: entry.layer.visible, opacity: entry.layer.opacity }))
     const resultGraphics = resultLayer.graphics.toArray().map((graphic) => ({ graphic, visible: graphic.visible }))
     const studyVisible = studyLayer.visible
     const labelsVisible = labelLayer.visible
@@ -409,7 +415,7 @@ export async function createInterferenceRuntime(
     resultLayer.graphics.forEach((graphic) => {
       const type = graphic.geometry?.type === 'point' ? 'point' : graphic.geometry?.type === 'polyline' ? 'polyline' : 'polygon'
       const selected = Boolean(graphic.attributes?.selected)
-      graphic.symbol = symbolFor(type, selected, currentBorderWidth)
+      graphic.symbol = graphic.attributes?.sourceSymbol || graphic.symbol
     })
   }
 
