@@ -131,145 +131,64 @@ const drawLegend = (context: CanvasRenderingContext2D, records: InterferenceReco
 }
 
 
+const panelLines = (context: CanvasRenderingContext2D, value: string, x: number, y: number, width: number, lineHeight = 22) => {
+  const words = value.split(/\s+/); const lines: string[] = []; let line = ''
+  context.font = context.font || '16px Arial'
+  words.forEach((word) => { const candidate = line ? `${line} ${word}` : word; if (context.measureText(candidate).width > width && line) { lines.push(line); line = word } else line = candidate }); if (line) lines.push(line)
+  lines.forEach((text, index) => context.fillText(text, x, y + index * lineHeight))
+  return y + Math.max(1, lines.length) * lineHeight
+}
+
+const drawAttachmentPanel = (context: CanvasRenderingContext2D, records: InterferenceRecord[], x: number, y: number, width: number, height: number, title: string, subtitle: string) => {
+  context.fillStyle = '#FFFFFF'; context.fillRect(x, y, width, height)
+  context.fillStyle = '#0B303A'; context.fillRect(x, y, width, 154)
+  context.fillStyle = '#FFFFFF'; context.font = '700 34px Arial'; context.fillText('DF Legal', x + 28, y + 48)
+  context.font = '700 22px Arial'; context.fillText(title.toUpperCase(), x + 28, y + 86)
+  context.font = '16px Arial'; context.fillText(subtitle, x + 28, y + 120)
+  let py = y + 205
+  context.fillStyle = '#173C46'; context.font = '700 24px Arial'; context.fillText('IDENTIFICAÇÃO', x + 28, py); py += 42
+  context.fillStyle = '#526166'; context.font = '600 17px Arial'
+  records.slice(0, 3).forEach((record) => { py = panelLines(context, record.layerTitle, x + 28, py, width - 56, 23) + 8; context.font = '15px Arial'; py = panelLines(context, `Classe: ${classValue(record)}`, x + 28, py, width - 56, 21) + 14; context.font = '600 17px Arial' })
+  context.strokeStyle = '#B06D1D'; context.lineWidth = 2; context.beginPath(); context.moveTo(x + 28, py); context.lineTo(x + width - 28, py); context.stroke(); py += 38
+  context.fillStyle = '#173C46'; context.font = '700 24px Arial'; context.fillText('INFORMAÇÕES', x + 28, py); py += 34
+  context.fillStyle = '#526166'; context.font = '15px Arial'
+  records.slice(0, 2).forEach((record) => { py = panelLines(context, `${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')}`, x + 28, py, width - 56, 21) + 8; Object.entries(record.attributes).filter(([key]) => !key.startsWith('_')).slice(0, 7).forEach(([key, value]) => { py = panelLines(context, `${key}: ${String(value)}`, x + 28, py, width - 56, 20) + 3 }); py += 10 })
+  if (py < y + height - 250) { context.strokeStyle = '#8F3035'; context.beginPath(); context.moveTo(x + 28, py); context.lineTo(x + width - 28, py); context.stroke(); py += 36; context.fillStyle = '#173C46'; context.font = '700 24px Arial'; context.fillText('LEGENDA', x + 28, py); py += 34; const entries = records.flatMap((record) => classEntriesFor(record).map((entry) => ({ record, entry }))); entries.slice(0, 12).forEach(({ record, entry }) => { const color = symbolColor(entry.symbol, mapColorForLegend(record)); context.fillStyle = color; context.fillRect(x + 28, py - 15, 22, 15); context.strokeStyle = '#526166'; context.strokeRect(x + 28, py - 15, 22, 15); context.fillStyle = '#526166'; context.font = '14px Arial'; py = panelLines(context, `${record.layerTitle} — ${entry.label}`, x + 62, py - 1, width - 90, 18) + 8 }) }
+  context.fillStyle = '#526166'; context.font = '13px Arial'; context.fillText(`Gerado em ${new Date().toLocaleString('pt-BR')}`, x + 28, y + height - 28)
+}
+
+const composeAttachmentPng = async (capture: CaptureResult, records: InterferenceRecord[], title: string, subtitle: string, filename: string) => {
+  const image = await loadImage(capture.dataUrl); const width = 1600; const height = 900; const panelW = 390; const mapX = 22; const mapY = 92; const mapW = width - panelW - 44; const mapH = height - 184
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height; const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou a exportação.')
+  context.fillStyle = '#F4F0E8'; context.fillRect(0, 0, width, height); context.fillStyle = '#FFFFFF'; context.fillRect(mapX, mapY - 20, mapW, mapH + 40)
+  const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio; const imageX = mapX + (mapW - drawW) / 2; const imageY = mapY + (mapH - drawH) / 2
+  context.drawImage(image, imageX, imageY, drawW, drawH); drawCoordinateGrid(context, capture, imageX, imageY, drawW, drawH, drawW, drawH); context.strokeStyle = '#263D42'; context.lineWidth = 3; context.strokeRect(imageX, imageY, drawW, drawH)
+  drawAttachmentPanel(context, records, width - panelW, 0, panelW, height, title, subtitle); context.strokeStyle = '#263D42'; context.lineWidth = 2; context.strokeRect(mapX, mapY, mapW, mapH); downloadDataUrl(canvas.toDataURL('image/png'), filename)
+}
+
 const composeInterferenceBoard = async (capture: CaptureResult, records: InterferenceRecord[], format: 'png' | 'jpg') => {
-  const image = await loadImage(capture.dataUrl)
-  const legendExtra = Math.max(0, records.reduce((total, record) => total + Math.ceil(legendLabel(record).length / 52) * 24, 0) - 96)
-  const canvas = document.createElement('canvas'); canvas.width = 2000; canvas.height = 1200 + legendExtra
-  const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou a prancha de exportação.')
-  drawBoardChrome(context, 'Prancha de interferência selecionada', 'Captura isolada: somente a geometria recortada selecionada e sua camada correspondente.', canvas.width, canvas.height)
-  const mapX = 140; const mapY = 220; const mapW = 1100; const mapH = 820
-  context.fillStyle = '#FFFFFF'; context.fillRect(mapX - 12, mapY - 32, mapW + 24, mapH + 44)
-  const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio
-  context.drawImage(image, mapX, mapY, drawW, drawH); drawCoordinateGrid(context, capture, mapX, mapY, mapW, mapH, drawW, drawH)
-  context.strokeStyle = '#263D42'; context.lineWidth = 3; context.strokeRect(mapX, mapY, drawW, drawH)
-  const panelX = 1325; const panelW = 590
-  context.fillStyle = '#FFFFFF'; context.fillRect(panelX, 220, panelW, 820)
-  context.fillStyle = '#173C46'; context.font = '700 27px Arial'; context.fillText('OCORRÊNCIA', panelX + 30, 270)
-  records.forEach((record, index) => {
-    const y = 330 + index * 250
-    context.fillStyle = '#EAF0EE'; context.fillRect(panelX + 22, y - 35, panelW - 44, 210)
-    context.fillStyle = '#173C46'; context.font = '700 22px Arial'; context.fillText(`${index + 1}. ${record.layerTitle}`, panelX + 38, y)
-    context.fillStyle = '#B06D1D'; context.font = '700 18px Arial'; context.fillText(`${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')}`, panelX + 38, y + 34)
-    context.fillStyle = '#526166'; context.font = '16px Arial'
-    Object.entries(record.attributes).slice(0, 5).forEach(([key, value], attrIndex) => context.fillText(`${key}: ${String(value).slice(0, 48)}`, panelX + 38, y + 70 + attrIndex * 24))
-  })
-  drawLegend(context, records, 82, 1100, 1170)
-  return format === 'jpg' ? canvas.toDataURL('image/jpeg', 0.92) : canvas.toDataURL('image/png')
+  const image = await loadImage(capture.dataUrl); const width = 1600; const height = 900; const panelW = 390; const mapX = 22; const mapY = 92; const mapW = width - panelW - 44; const mapH = height - 184
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height; const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou a prancha de exportação.')
+  context.fillStyle = '#F4F0E8'; context.fillRect(0, 0, width, height); context.fillStyle = '#FFFFFF'; context.fillRect(mapX, mapY - 20, mapW, mapH + 40)
+  const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio; const imageX = mapX + (mapW - drawW) / 2; const imageY = mapY + (mapH - drawH) / 2
+  context.drawImage(image, imageX, imageY, drawW, drawH); drawCoordinateGrid(context, capture, imageX, imageY, drawW, drawH, drawW, drawH); context.strokeStyle = '#263D42'; context.lineWidth = 3; context.strokeRect(imageX, imageY, drawW, drawH)
+  drawAttachmentPanel(context, records, width - panelW, 0, panelW, height, 'Mapa analisado', 'Prancha de interferência'); return format === 'jpg' ? canvas.toDataURL('image/jpeg', 0.92) : canvas.toDataURL('image/png')
 }
 
 const exportIndividualPdf = async (capture: CaptureResult, record: InterferenceRecord) => {
-  const image = await loadImage(capture.dataUrl)
-  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
-  const w = 297; const h = 210; const m = 12
-  pdf.setFillColor(11,48,58); pdf.rect(0,0,w,25,'F'); pdf.setTextColor(242,177,52); pdf.setFont('helvetica','bold'); pdf.setFontSize(15); pdf.text('DF LEGAL · ANÁLISE DE INTERFERÊNCIAS',m,11); pdf.setTextColor(255,255,255); pdf.setFontSize(10); pdf.text('Interferência selecionada',m,19)
-  const mapW=178, mapH=150, mapX=m, mapY=35; const ratio=Math.min(mapW/image.width,mapH/image.height); const dw=image.width*ratio, dh=image.height*ratio
-  const imageX = mapX+(mapW-dw)/2; const imageY = mapY+(mapH-dh)/2; pdf.addImage(image,'PNG',imageX,imageY,dw,dh); drawPdfCoordinateGrid(pdf, capture, imageX, imageY, dw, dh); pdf.setDrawColor(38,61,66); pdf.rect(imageX,imageY,dw,dh)
-  pdf.setTextColor(23,60,70); pdf.setFont('helvetica','bold'); pdf.setFontSize(13); pdf.text(record.layerTitle,205,44); pdf.setFontSize(11); pdf.text(pdf.splitTextToSize(`Classe: ${classValue(record)}`, 78).slice(0,2),205,53); pdf.text(`Tipo: ${geometryLabel(record.geometryType)}`,205,68); pdf.text(`Relação: ${String(record.attributes._relacao_espacial || 'interseção')}`,205,75)
-  pdf.setFont('helvetica','normal'); pdf.setFontSize(9); let y=82; Object.entries(record.attributes).filter(([key])=>!key.startsWith('_')).slice(0,9).forEach(([key,value])=>{ pdf.text(`${key}: ${String(value).slice(0,65)}`,205,y); y+=7 })
-  let legendY = 177
-  classEntriesFor(record).forEach((entry) => { const rgb = cssRgb(symbolColor(entry.symbol, mapColorForLegend(record))); pdf.setFillColor(rgb[0], rgb[1], rgb[2]); pdf.rect(205,legendY-4,6,4,'F'); pdf.setTextColor(23,60,70); pdf.text(pdf.splitTextToSize(`Legenda — ${record.layerTitle} — ${entry.label}`, 78),214,legendY); legendY += 7 })
-  pdf.save(`interferencia-${slug(record.layerTitle)}-${slug(record.id)}.pdf`)
+  const image = await loadImage(capture.dataUrl); const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' }); const W=297,H=210,panelX=224,mapX=8,mapY=16,mapW=210,mapH=184
+  pdf.setFillColor(244,240,232); pdf.rect(0,0,W,H,'F'); const ratio=Math.min(mapW/image.width,mapH/image.height); const dw=image.width*ratio,dh=image.height*ratio; const ix=mapX+(mapW-dw)/2,iy=mapY+(mapH-dh)/2; pdf.addImage(image,'PNG',ix,iy,dw,dh); drawPdfCoordinateGrid(pdf,capture,ix,iy,dw,dh); pdf.setDrawColor(38,61,66); pdf.rect(ix,iy,dw,dh); pdf.setFillColor(255,255,255); pdf.rect(panelX,0,W-panelX,H,'F'); pdf.setFillColor(11,48,58); pdf.rect(panelX,0,W-panelX,38,'F'); pdf.setTextColor(255,255,255); pdf.setFont('helvetica','bold'); pdf.setFontSize(16); pdf.text('DF Legal',panelX+7,13); pdf.setFontSize(9); pdf.text('MAPA ANALISADO',panelX+7,23); pdf.setFont('helvetica','normal'); pdf.setFontSize(7); pdf.text('Interferência selecionada',panelX+7,31)
+  let y=53; pdf.setTextColor(23,60,70); pdf.setFont('helvetica','bold'); pdf.setFontSize(11); pdf.text('IDENTIFICAÇÃO',panelX+7,y); y+=13; pdf.setFontSize(9); pdf.text(pdf.splitTextToSize(record.layerTitle,64),panelX+7,y); y+=12; pdf.setFont('helvetica','normal'); pdf.setFontSize(8); pdf.text(pdf.splitTextToSize(`Classe: ${classValue(record)}`,64),panelX+7,y); y+=16; pdf.setDrawColor(176,109,29); pdf.line(panelX+7,y,W-7,y); y+=12; pdf.setFont('helvetica','bold'); pdf.setFontSize(10); pdf.text('INFORMAÇÕES',panelX+7,y); y+=10; pdf.setFont('helvetica','normal'); pdf.setFontSize(7.5); pdf.text(pdf.splitTextToSize(`${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')}`,64),panelX+7,y); y+=10; Object.entries(record.attributes).filter(([key])=>!key.startsWith('_')).slice(0,10).forEach(([key,value])=>{ pdf.text(pdf.splitTextToSize(`${key}: ${String(value)}`,64),panelX+7,y); y+=7 }); y+=4; pdf.setDrawColor(143,48,53); pdf.line(panelX+7,y,W-7,y); y+=12; pdf.setFont('helvetica','bold'); pdf.setFontSize(10); pdf.text('LEGENDA',panelX+7,y); y+=9; classEntriesFor(record).forEach((entry)=>{ const rgb=cssRgb(symbolColor(entry.symbol,mapColorForLegend(record))); pdf.setFillColor(rgb[0],rgb[1],rgb[2]); pdf.rect(panelX+7,y-4,4,3,'F'); pdf.setTextColor(82,97,102); pdf.setFont('helvetica','normal'); pdf.setFontSize(7); pdf.text(pdf.splitTextToSize(`${record.layerTitle} — ${entry.label}`,57),panelX+14,y); y+=8 }); pdf.setFontSize(6); pdf.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`,panelX+7,H-8); pdf.save(`interferencia-${slug(record.layerTitle)}-${slug(record.id)}.pdf`)
 }
 
 const exportConsolidatedPdf = async (capture: CaptureResult, records: InterferenceRecord[]) => {
-  const image = await loadImage(capture.dataUrl)
-  const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
-  const pageWidth = 297; const pageHeight = 210; const margin = 12
-  const header = (title: string) => {
-    pdf.setFillColor(11, 48, 58); pdf.rect(0, 0, pageWidth, 24, 'F')
-    pdf.setTextColor(242, 177, 52); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(15); pdf.text('DF LEGAL · ANÁLISE DE INTERFERÊNCIAS', margin, 10)
-    pdf.setTextColor(255, 255, 255); pdf.setFontSize(10); pdf.text(title, margin, 18)
-  }
-  header('Prancha consolidada — mapa e interferências clipadas')
-  const mapX = margin; const mapY = 34; const mapW = 180; const mapH = 155
-  pdf.setFillColor(248, 248, 245); pdf.rect(mapX - 3, mapY - 3, mapW + 6, mapH + 6, 'F')
-  const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio
-  const imageX = mapX + (mapW - drawW) / 2; const imageY = mapY + (mapH - drawH) / 2
-  pdf.addImage(image, 'PNG', imageX, imageY, drawW, drawH)
-  drawPdfCoordinateGrid(pdf, capture, imageX, imageY, drawW, drawH)
-  pdf.setDrawColor(38, 61, 66); pdf.rect(imageX, imageY, drawW, drawH)
-  pdf.setTextColor(23, 60, 70); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.text('CONSOLIDADO', 205, 42)
-  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(10); pdf.text(`Interferências: ${records.length}`, 205, 52); pdf.text(`Classes: ${new Set(records.map(classValue)).size}`, 205, 59); pdf.text(`Camadas: ${new Set(records.map((record) => record.layerId)).size}`, 205, 66)
-  let ly=82
-  records.flatMap((record) => classEntriesFor(record).map((entry) => ({ record, entry }))).forEach(({ record, entry }) => {
-    const lines = pdf.splitTextToSize(`${record.layerTitle} — ${entry.label}`, 76)
-    const rowHeight = Math.max(8, lines.length * 5)
-    if (ly + rowHeight > 190) { pdf.addPage(); header('Prancha consolidada — legenda completa'); ly = 38 }
-    const rgb = cssRgb(symbolColor(entry.symbol, mapColorForLegend(record))); pdf.setFillColor(rgb[0], rgb[1], rgb[2]); pdf.rect(205, ly - 4, 6, 4, 'F')
-    pdf.setTextColor(23,60,70); pdf.setFontSize(8); pdf.text(lines, 214, ly); ly += rowHeight + 3
-  })
-  const rows = records.map((record, index) => ({ n:index+1, layer:record.layerTitle, klass:`${classValue(record)}${record.attributes._identificadores_agrupados ? ` — IDs: ${String(record.attributes._identificadores_agrupados)}` : ''}`, relation:String(record.attributes._relacao_espacial || 'interseção'), id:record.id }))
-  let index=0
-  while (index < rows.length) {
-    pdf.addPage(); header('Prancha consolidada — tabela de interferências')
-    pdf.setFillColor(23,60,70); pdf.rect(margin, 34, pageWidth-margin*2, 9, 'F'); pdf.setTextColor(255,255,255); pdf.setFont('helvetica','bold'); pdf.setFontSize(8); pdf.text('Nº', margin+3, 40); pdf.text('CAMADA', margin+18, 40); pdf.text('CLASSE DA INTERFERÊNCIA', margin+105, 40); pdf.text('RELAÇÃO', margin+220, 40); pdf.text('ID', margin+250, 40)
-    let y=43
-    for (let count=0; count<20 && index<rows.length; count++, index++) {
-      const row=rows[index]; const classLines = pdf.splitTextToSize(row.klass, 108).slice(0, 3); const rowHeight = Math.max(8, classLines.length * 5 + 3)
-      if (y + rowHeight > 195) { pdf.addPage(); header('Prancha consolidada — tabela de interferências (continuação)'); y = 43 }
-      pdf.setFillColor(count%2?245:234,248,247); pdf.rect(margin,y,pageWidth-margin*2,rowHeight,'F'); pdf.setTextColor(23,60,70); pdf.setFont('helvetica','normal'); pdf.setFontSize(8); pdf.text(String(row.n),margin+3,y+5); pdf.text(row.layer.slice(0,42),margin+18,y+5); pdf.text(classLines,margin+105,y+4); pdf.text(row.relation.slice(0,18),margin+220,y+5); pdf.text(row.id.slice(0,24),margin+250,y+5); y+=rowHeight
-    }
-  }
-  pdf.save(`prancha-consolidada-interferencias-${new Date().toISOString().slice(0,10)}.pdf`)
+  const image = await loadImage(capture.dataUrl); const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' }); const W=297,H=210,panelX=224,mapX=8,mapY=16,mapW=210,mapH=184
+  pdf.setFillColor(244,240,232); pdf.rect(0,0,W,H,'F'); const ratio=Math.min(mapW/image.width,mapH/image.height); const dw=image.width*ratio,dh=image.height*ratio; const ix=mapX+(mapW-dw)/2,iy=mapY+(mapH-dh)/2; pdf.addImage(image,'PNG',ix,iy,dw,dh); drawPdfCoordinateGrid(pdf,capture,ix,iy,dw,dh); pdf.setDrawColor(38,61,66); pdf.rect(ix,iy,dw,dh); pdf.setFillColor(255,255,255); pdf.rect(panelX,0,W-panelX,H,'F'); pdf.setFillColor(11,48,58); pdf.rect(panelX,0,W-panelX,38,'F'); pdf.setTextColor(255,255,255); pdf.setFont('helvetica','bold'); pdf.setFontSize(16); pdf.text('DF Legal',panelX+7,13); pdf.setFontSize(9); pdf.text('MAPA ANALISADO',panelX+7,23); pdf.setFont('helvetica','normal'); pdf.setFontSize(7); pdf.text('Prancha consolidada',panelX+7,31)
+  let y=53; pdf.setTextColor(23,60,70); pdf.setFont('helvetica','bold'); pdf.setFontSize(10); pdf.text('IDENTIFICAÇÃO',panelX+7,y); y+=12; pdf.setFont('helvetica','normal'); pdf.setFontSize(8); pdf.text(`Interferências: ${records.length}`,panelX+7,y); y+=7; pdf.text(`Camadas: ${new Set(records.map((record)=>record.layerId)).size}`,panelX+7,y); y+=15; pdf.setDrawColor(176,109,29); pdf.line(panelX+7,y,W-7,y); y+=12; pdf.setFont('helvetica','bold'); pdf.setFontSize(10); pdf.text('LEGENDA',panelX+7,y); y+=10; records.flatMap((record)=>classEntriesFor(record).map((entry)=>({record,entry}))).forEach(({record,entry})=>{ if(y>190){pdf.addPage(); y=20}; const rgb=cssRgb(symbolColor(entry.symbol,mapColorForLegend(record))); pdf.setFillColor(rgb[0],rgb[1],rgb[2]); pdf.rect(panelX+7,y-4,4,3,'F'); pdf.setTextColor(82,97,102); pdf.setFont('helvetica','normal'); pdf.setFontSize(6.5); pdf.text(pdf.splitTextToSize(`${record.layerTitle} — ${entry.label}`,57),panelX+14,y); y+=8 }); pdf.setFontSize(6); pdf.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`,panelX+7,H-8); pdf.save(`prancha-consolidada-interferencias-${new Date().toISOString().slice(0,10)}.pdf`)
 }
 
-const composeSummaryInfographic = async (capture: CaptureResult, records: InterferenceRecord[]) => {
-  const image = await loadImage(capture.dataUrl)
-  const width = 1400
-  const margin = 60
-  const mapX = 120
-  const mapW = width - mapX - margin
-  const mapH = 720
-  const byLayer = Array.from(new Map(records.map((record) => [record.layerId, record])).values())
-  const layerRows = Math.max(1, byLayer.length)
-  const cardH = 86
-  const cardsGap = 14
-  const panelY = 1010
-  const panelHeight = 300 + layerRows * 66
-  const cardsStart = panelY + panelHeight + 100
-  const recordsHeight = Math.max(1, records.length) * (cardH + cardsGap)
-  const legendRows = Math.max(1, records.reduce((total, record) => total + Math.ceil(legendLabel(record).length / 52), 0))
-  const height = cardsStart + recordsHeight + 180 + legendRows * 34
-  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
-  const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou o quadro-resumo.')
-  drawBoardChrome(context, 'Quadro-resumo técnico das interferências', 'Síntese completa da área analisada — geometria clipada, camadas participantes e ocorrências consolidadas.', width, height)
+const composeSummaryInfographic = async (capture: CaptureResult, records: InterferenceRecord[]) => composeInterferenceBoard(capture, records, 'png')
 
-  const mapY = 220
-  context.fillStyle = '#FFFFFF'; context.fillRect(mapX - 14, mapY - 34, mapW + 28, mapH + 48)
-  const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio
-  const centeredX = mapX + (mapW - drawW) / 2
-  context.drawImage(image, centeredX, mapY, drawW, drawH)
-  drawCoordinateGrid(context, capture, centeredX, mapY, drawW, drawH, drawW, drawH)
-  context.strokeStyle = '#263D42'; context.lineWidth = 3; context.strokeRect(centeredX, mapY, drawW, drawH)
-
-  context.fillStyle = '#FFFFFF'; context.fillRect(margin, panelY, mapW, panelHeight)
-  context.fillStyle = '#173C46'; context.font = '700 30px Arial'; context.fillText('SÍNTESE DA ANÁLISE', margin + 34, panelY + 56)
-  context.fillStyle = '#F2B134'; context.font = '700 64px Arial'; context.fillText(String(records.length), margin + 38, panelY + 140)
-  context.fillStyle = '#526166'; context.font = '600 20px Arial'; context.fillText('interferências consolidadas', margin + 38, panelY + 178)
-  context.fillStyle = '#F2B134'; context.font = '700 64px Arial'; context.fillText(String(byLayer.length), margin + 430, panelY + 140)
-  context.fillStyle = '#526166'; context.font = '600 20px Arial'; context.fillText('camadas participantes', margin + 430, panelY + 178)
-  context.fillStyle = '#173C46'; context.font = '700 22px Arial'; context.fillText('Distribuição por camada', margin + 38, panelY + 235)
-  byLayer.forEach((record, index) => {
-    const y = panelY + 280 + index * 66
-    context.fillStyle = index % 2 ? '#F5F8F7' : '#EAF0EE'; context.fillRect(margin + 28, y - 27, mapW - 56, 48)
-    const swatch = symbolColor(record.symbol, '#E63946'); context.fillStyle = swatch; context.fillRect(margin + 46, y - 12, 22, 16)
-    context.fillStyle = '#173C46'; context.font = '700 17px Arial'; context.fillText(record.layerTitle.slice(0, 70), margin + 86, y)
-    context.fillStyle = '#526166'; context.font = '16px Arial'; context.textAlign = 'right'; context.fillText(`${records.filter((item) => item.layerId === record.layerId).length} ocorrência(s)`, width - margin - 46, y); context.textAlign = 'left'
-  })
-
-  const recordsTitleY = cardsStart - 38
-  context.fillStyle = '#173C46'; context.font = '700 28px Arial'; context.fillText('INTERFERÊNCIAS CLIPADAS', margin, recordsTitleY)
-  records.forEach((record, index) => {
-    const y = cardsStart + index * (cardH + cardsGap)
-    context.fillStyle = index % 2 ? '#EAF0EE' : '#F5F8F7'; context.fillRect(margin, y, mapW, cardH)
-    context.fillStyle = '#B06D1D'; context.font = '700 22px Arial'; context.fillText(`${index + 1}`, margin + 22, y + 34)
-    context.fillStyle = '#173C46'; context.font = '700 19px Arial'; context.fillText(record.layerTitle.slice(0, 74), margin + 70, y + 29)
-    context.fillStyle = '#526166'; context.font = '16px Arial'; context.fillText(`${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')} · ${record.id}`, margin + 70, y + 57)
-  })
-  const legendY = cardsStart + recordsHeight + 44
-  drawLegend(context, records, margin, legendY, mapW)
-  return canvas.toDataURL('image/png')
-}
 
 const classValue = (record: InterferenceRecord) => {
   const runtimeClass = record.attributes._classes_legenda || record.attributes._classe_legenda
