@@ -36,20 +36,26 @@ const geometryLabel = (type?: string) => type === 'point' ? 'Ponto' : type === '
 const legendLabel = (record: InterferenceRecord) => `${record.layerTitle} — ${classValue(record)}`
 const classEntriesFor = (record: InterferenceRecord) => record.classEntries?.length ? record.classEntries : [{ label: classValue(record), symbol: record.symbol }]
 const symbolColor = (symbol?: __esri.Symbol, fallback = '#E63946') => {
-  const candidate = symbol as any
-  const colors = [candidate?.color, candidate?.outline?.color]
-  for (const color of colors) {
-    if (color?.toRgba) {
-      const [r, g, b, a] = color.toRgba()
-      if ((a ?? 1) > 0.05 && (r + g + b) > 24) return `rgba(${r},${g},${b},${a ?? 1})`
-    }
-    if (Array.isArray(color) && (color[3] ?? 255) > 12 && (color[0] + color[1] + color[2]) > 24) return `rgba(${color[0]},${color[1]},${color[2]},${(color[3] ?? 255) / 255})`
+  const toCss = (value: any): string | undefined => {
+    if (!value) return undefined
+    if (value.toRgba) { const rgba = value.toRgba(); if ((rgba[3] ?? 1) > 0.05) return `rgba(${rgba[0]},${rgba[1]},${rgba[2]},${rgba[3] ?? 1})` }
+    if (Array.isArray(value) && value.length >= 3 && (value[3] ?? 255) > 12) return `rgba(${value[0]},${value[1]},${value[2]},${(value[3] ?? 255) / 255})`
+    if (typeof value === 'string' && (/^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(value) || /^rgba?\(/i.test(value))) return value
+    return undefined
   }
-  const json = candidate?.toJSON?.()
-  const jsonColor = json?.color || json?.symbol?.color || json?.outline?.color
-  if (Array.isArray(jsonColor) && (jsonColor[3] ?? 255) > 12 && (jsonColor[0] + jsonColor[1] + jsonColor[2]) > 24) return `rgba(${jsonColor[0]},${jsonColor[1]},${jsonColor[2]},${(jsonColor[3] ?? 255) / 255})`
-  return fallback
+  const visit = (value: any, depth = 0): string | undefined => {
+    if (!value || depth > 8) return undefined
+    const direct = toCss(value); if (direct) return direct
+    if (Array.isArray(value)) { for (const item of value) { const found = visit(item, depth + 1); if (found) return found } return undefined }
+    if (typeof value === 'object') {
+      for (const key of ['color', 'fill', 'fillColor', 'stroke', 'outline', 'outlineColor', 'symbol', 'symbolLayers']) { const found = visit(value[key], depth + 1); if (found) return found }
+    }
+    return undefined
+  }
+  const candidate = symbol as any
+  return visit(candidate) || visit(candidate?.toJSON?.()) || fallback
 }
+
 
 const cssRgb = (value: string, fallback: [number, number, number] = [230, 57, 70]): [number, number, number] => {
   const rgba = value.match(/rgba?\(([^)]+)\)/i)?.[1].split(',').map((part) => Number(part.trim()))
