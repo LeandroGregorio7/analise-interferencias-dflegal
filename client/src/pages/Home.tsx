@@ -36,30 +36,34 @@ const geometryLabel = (type?: string) => type === 'point' ? 'Ponto' : type === '
 const legendLabel = (record: InterferenceRecord) => `${record.layerTitle} — ${classValue(record)}`
 const classEntriesFor = (record: InterferenceRecord) => record.classEntries?.length ? record.classEntries : [{ label: classValue(record), symbol: record.symbol }]
 const symbolColor = (symbol?: __esri.Symbol, fallback = '#E63946') => {
-  const toCss = (value: any): string | undefined => {
+  const isBlack = (rgb: number[]) => rgb[0] < 12 && rgb[1] < 12 && rgb[2] < 12
+  const toCss = (value: any, allowBlack = false): string | undefined => {
     if (!value) return undefined
-    if (value.toRgba) { const rgba = value.toRgba(); if ((rgba[3] ?? 1) > 0.05 && (rgba[0] + rgba[1] + rgba[2]) > 24) return `rgba(${rgba[0]},${rgba[1]},${rgba[2]},${rgba[3] ?? 1})` }
-    if (Array.isArray(value) && value.length >= 3 && (value[3] ?? 255) > 12 && (value[0] + value[1] + value[2]) > 24) return `rgba(${value[0]},${value[1]},${value[2]},${(value[3] ?? 255) / 255})`
-    if (typeof value === 'string' && (/^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(value) || /^rgba?\(/i.test(value))) return value
-    return undefined
-  }
-  const findFill = (value: any, depth = 0): string | undefined => {
-    if (!value || depth > 10) return undefined
-    if (Array.isArray(value)) { for (const item of value) { const found = findFill(item, depth + 1); if (found) return found } return undefined }
-    if (typeof value !== 'object') return undefined
-    // Fill/symbolLayers têm prioridade: a legenda deve reproduzir o preenchimento,
-    // não a linha preta de contorno do polígono.
-    for (const key of ['fill', 'fillColor', 'symbolLayers']) {
-      const part = value[key]
-      if (Array.isArray(part)) { for (const layer of part) { if (layer?.type === 'CIMSymbolLayer' && layer?.layerType && !String(layer.layerType).toLowerCase().includes('fill')) continue; const found = findFill(layer, depth + 1); if (found) return found } }
-      else { const direct = toCss(part); if (direct) return direct; const found = findFill(part, depth + 1); if (found) return found }
+    if (value.toRgba) { const rgba = value.toRgba(); if ((rgba[3] ?? 1) > 0.05 && (allowBlack || !isBlack(rgba))) return `rgba(${rgba[0]},${rgba[1]},${rgba[2]},${rgba[3] ?? 1})` }
+    if (Array.isArray(value) && value.length >= 3 && (value[3] ?? 255) > 12 && (allowBlack || !isBlack(value))) return `rgba(${value[0]},${value[1]},${value[2]},${(value[3] ?? 255) / 255})`
+    if (typeof value === 'string' && (/^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(value) || /^rgba?\(/i.test(value))) {
+      if (!allowBlack && /^#0{6,8}$/i.test(value)) return undefined
+      return value
     }
-    const direct = toCss(value.color); if (direct) return direct
-    for (const key of ['symbol', 'marker', 'graphic']) { const found = findFill(value[key], depth + 1); if (found) return found }
     return undefined
   }
-  const candidate = symbol as any
-  return findFill(candidate) || findFill(candidate?.toJSON?.()) || fallback
+  const itemsOf = (value: any) => Array.isArray(value) ? value : Array.isArray(value?.items) ? value.items : value ? [value] : []
+  const fillColor = (value: any, depth = 0): string | undefined => {
+    if (!value || depth > 12) return undefined
+    for (const item of itemsOf(value)) {
+      const type = String(item?.type || item?.layerType || '').toLowerCase()
+      if (type.includes('fill') || type.includes('cimpolygon') || type.includes('polygon')) {
+        for (const key of ['color', 'fill', 'fillColor', 'paint']) { const found = toCss(item?.[key]); if (found) return found }
+      }
+      for (const key of ['symbolLayers', 'layers', 'primitiveOverrides', 'symbol', 'marker']) {
+        const found = fillColor(item?.[key], depth + 1); if (found) return found
+      }
+    }
+    return undefined
+  }
+  const candidate: any = symbol
+  const json = candidate?.toJSON?.()
+  return fillColor(candidate) || fillColor(json) || toCss(candidate?.color) || toCss(json?.color) || fallback
 }
 
 

@@ -251,9 +251,11 @@ export async function createInterferenceRuntime(
                 ? 'sobreposição'
                 : 'interseção'
           const renderer: any = entry.layer.renderer as any
+          const fields = [renderer?.field, ...(renderer?.field2 ? [renderer.field2] : []), ...(renderer?.field3 ? [renderer.field3] : [])].filter(Boolean)
+          const values = fields.map((field: string) => graphic.attributes?.[field])
           const uniqueInfo = renderer?.uniqueValueInfos?.find((info: any) => {
-            const values = Array.isArray(info.value) ? info.value : [info.value]
-            return values.some((value: any) => Object.values(graphic.attributes || {}).some((attribute) => String(attribute) === String(value)))
+            const infoValues = Array.isArray(info.value) ? info.value : [info.value]
+            return infoValues.length === values.length && infoValues.every((value: any, i: number) => String(value) === String(values[i]))
           })
           const sourceSymbol = (graphic as any).symbol ?? renderer?.getSymbol?.(graphic) ?? uniqueInfo?.symbol ?? renderer?.symbol ?? symbolFor(entry.geometryType!)
           const clippedGraphic = new Graphic({ geometry: clippedGeometry, attributes: graphic.attributes, symbol: sourceSymbol })
