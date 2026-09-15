@@ -75,7 +75,7 @@ const drawCoordinateGrid = (context: CanvasRenderingContext2D, capture: CaptureR
   context.strokeStyle = 'rgba(23,60,70,.28)'
   context.fillStyle = '#173C46'
   context.lineWidth = 1
-  context.font = '600 16px Arial'
+  context.font = '600 10px Arial'
   context.textAlign = 'center'
   for (let i = 0; i <= gridCount; i += 1) {
     const px = mapX + (drawW * i) / gridCount
@@ -84,11 +84,11 @@ const drawCoordinateGrid = (context: CanvasRenderingContext2D, capture: CaptureR
     context.beginPath(); context.moveTo(mapX, py); context.lineTo(mapX + drawW, py); context.stroke()
     // Topo horizontal: somente X no topo.
     const xValue = xmin + ((xmax - xmin) * i) / gridCount
-    context.fillText(xValue.toFixed(0), px, mapY - 12)
+    context.fillText(xValue.toFixed(0), px, mapY + 13)
     // Lado esquerdo vertical: somente Y, crescendo visualmente de baixo para cima.
     const yValue = ymax - ((ymax - ymin) * i) / gridCount
-    context.textAlign = 'right'
-    context.fillText(yValue.toFixed(0), mapX - 12, py + 6)
+    context.textAlign = 'left'
+    context.fillText(yValue.toFixed(0), mapX + 5, py + 12)
     context.textAlign = 'center'
   }
   context.restore()
@@ -97,12 +97,12 @@ const drawCoordinateGrid = (context: CanvasRenderingContext2D, capture: CaptureR
 const drawPdfCoordinateGrid = (pdf: jsPDF, capture: CaptureResult, mapX: number, mapY: number, mapW: number, mapH: number) => {
   if (!capture.extent) return
   const { xmin, ymin, xmax, ymax } = capture.extent; const gridCount = 5
-  pdf.setDrawColor(23, 60, 70); pdf.setTextColor(23, 60, 70); pdf.setLineWidth(0.15); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(6)
+  pdf.setDrawColor(23, 60, 70); pdf.setTextColor(23, 60, 70); pdf.setLineWidth(0.15); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(4.5)
   for (let i = 0; i <= gridCount; i += 1) {
     const px = mapX + (mapW * i) / gridCount; const py = mapY + (mapH * i) / gridCount
     pdf.line(px, mapY, px, mapY + mapH); pdf.line(mapX, py, mapX + mapW, py)
     pdf.text(String(Math.round(xmin + ((xmax - xmin) * i) / gridCount)), px, mapY - 2, { align: 'center' })
-    pdf.text(String(Math.round(ymax - ((ymax - ymin) * i) / gridCount)), mapX - 2, py + 2, { align: 'right' })
+    pdf.text(String(Math.round(ymax - ((ymax - ymin) * i) / gridCount)), mapX + 2, py + 2, { align: 'left' })
   }
 }
 
@@ -145,17 +145,20 @@ const drawAttachmentPanel = (context: CanvasRenderingContext2D, records: Interfe
   context.fillStyle = '#FFFFFF'; context.font = '700 34px Arial'; context.fillText('DF Legal', x + 28, y + 48)
   context.font = '700 22px Arial'; context.fillText(title.toUpperCase(), x + 28, y + 86)
   context.font = '16px Arial'; context.fillText(subtitle, x + 28, y + 120)
-  let py = y + 205
+  const inner = width - 56; let py = y + 205
   context.fillStyle = '#173C46'; context.font = '700 24px Arial'; context.fillText('IDENTIFICAÇÃO', x + 28, py); py += 42
   context.fillStyle = '#526166'; context.font = '600 17px Arial'
-  records.slice(0, 3).forEach((record) => { py = panelLines(context, record.layerTitle, x + 28, py, width - 56, 23) + 8; context.font = '15px Arial'; py = panelLines(context, `Classe: ${classValue(record)}`, x + 28, py, width - 56, 21) + 14; context.font = '600 17px Arial' })
-  context.strokeStyle = '#B06D1D'; context.lineWidth = 2; context.beginPath(); context.moveTo(x + 28, py); context.lineTo(x + width - 28, py); context.stroke(); py += 38
-  context.fillStyle = '#173C46'; context.font = '700 24px Arial'; context.fillText('INFORMAÇÕES', x + 28, py); py += 34
-  context.fillStyle = '#526166'; context.font = '15px Arial'
-  records.slice(0, 2).forEach((record) => { py = panelLines(context, `${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')}`, x + 28, py, width - 56, 21) + 8; Object.entries(record.attributes).filter(([key]) => !key.startsWith('_')).slice(0, 7).forEach(([key, value]) => { py = panelLines(context, `${key}: ${String(value)}`, x + 28, py, width - 56, 20) + 3 }); py += 10 })
-  if (py < y + height - 250) { context.strokeStyle = '#8F3035'; context.beginPath(); context.moveTo(x + 28, py); context.lineTo(x + width - 28, py); context.stroke(); py += 36; context.fillStyle = '#173C46'; context.font = '700 24px Arial'; context.fillText('LEGENDA', x + 28, py); py += 34; const entries = records.flatMap((record) => classEntriesFor(record).map((entry) => ({ record, entry }))); entries.slice(0, 12).forEach(({ record, entry }) => { const color = symbolColor(entry.symbol, mapColorForLegend(record)); context.fillStyle = color; context.fillRect(x + 28, py - 15, 22, 15); context.strokeStyle = '#526166'; context.strokeRect(x + 28, py - 15, 22, 15); context.fillStyle = '#526166'; context.font = '14px Arial'; py = panelLines(context, `${record.layerTitle} — ${entry.label}`, x + 62, py - 1, width - 90, 18) + 8 }) }
-  context.fillStyle = '#526166'; context.font = '13px Arial'; context.fillText(`Gerado em ${new Date().toLocaleString('pt-BR')}`, x + 28, y + height - 28)
+  records.slice(0, 2).forEach((record) => { py = panelLines(context, record.layerTitle, x + 28, py, inner, 22) + 5; context.font = '15px Arial'; py = panelLines(context, `Classe: ${classValue(record)}`, x + 28, py, inner, 19) + 9; context.font = '600 17px Arial' })
+  context.strokeStyle = '#B06D1D'; context.lineWidth = 2; context.beginPath(); context.moveTo(x + 28, y + 345); context.lineTo(x + width - 28, y + 345); context.stroke()
+  context.fillStyle = '#173C46'; context.font = '700 24px Arial'; context.fillText('INFORMAÇÕES', x + 28, y + 386)
+  context.fillStyle = '#526166'; context.font = '14px Arial'; let infoY = y + 420
+  records.slice(0, 1).forEach((record) => { infoY = panelLines(context, `${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')}`, x + 28, infoY, inner, 18) + 4; Object.entries(record.attributes).filter(([key]) => !key.startsWith('_')).slice(0, 7).forEach(([key, value]) => { infoY = panelLines(context, `${key}: ${String(value)}`, x + 28, infoY, inner, 17) + 2 }) })
+  const legendTop = y + 620; context.strokeStyle = '#8F3035'; context.beginPath(); context.moveTo(x + 28, legendTop - 28); context.lineTo(x + width - 28, legendTop - 28); context.stroke(); context.fillStyle = '#173C46'; context.font = '700 24px Arial'; context.fillText('LEGENDA', x + 28, legendTop)
+  let legendY = legendTop + 34; const entries = records.flatMap((record) => classEntriesFor(record).map((entry) => ({ record, entry })))
+  entries.slice(0, 10).forEach(({ record, entry }) => { const color = symbolColor(entry.symbol, mapColorForLegend(record)); context.fillStyle = color; context.fillRect(x + 28, legendY - 14, 22, 14); context.strokeStyle = '#526166'; context.strokeRect(x + 28, legendY - 14, 22, 14); context.fillStyle = '#526166'; context.font = '13px Arial'; legendY = panelLines(context, `${record.layerTitle} — ${entry.label}`, x + 62, legendY - 1, inner - 34, 16) + 5 })
+  context.fillStyle = '#526166'; context.font = '12px Arial'; context.fillText(`Gerado em ${new Date().toLocaleString('pt-BR')}`, x + 28, y + height - 28)
 }
+
 
 const composeAttachmentPng = async (capture: CaptureResult, records: InterferenceRecord[], title: string, subtitle: string, filename: string) => {
   const image = await loadImage(capture.dataUrl); const width = 1600; const height = 900; const panelW = 390; const mapX = 22; const mapY = 92; const mapW = width - panelW - 44; const mapH = height - 184
