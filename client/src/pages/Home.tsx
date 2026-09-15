@@ -38,22 +38,28 @@ const classEntriesFor = (record: InterferenceRecord) => record.classEntries?.len
 const symbolColor = (symbol?: __esri.Symbol, fallback = '#E63946') => {
   const toCss = (value: any): string | undefined => {
     if (!value) return undefined
-    if (value.toRgba) { const rgba = value.toRgba(); if ((rgba[3] ?? 1) > 0.05) return `rgba(${rgba[0]},${rgba[1]},${rgba[2]},${rgba[3] ?? 1})` }
-    if (Array.isArray(value) && value.length >= 3 && (value[3] ?? 255) > 12) return `rgba(${value[0]},${value[1]},${value[2]},${(value[3] ?? 255) / 255})`
+    if (value.toRgba) { const rgba = value.toRgba(); if ((rgba[3] ?? 1) > 0.05 && (rgba[0] + rgba[1] + rgba[2]) > 24) return `rgba(${rgba[0]},${rgba[1]},${rgba[2]},${rgba[3] ?? 1})` }
+    if (Array.isArray(value) && value.length >= 3 && (value[3] ?? 255) > 12 && (value[0] + value[1] + value[2]) > 24) return `rgba(${value[0]},${value[1]},${value[2]},${(value[3] ?? 255) / 255})`
     if (typeof value === 'string' && (/^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(value) || /^rgba?\(/i.test(value))) return value
     return undefined
   }
-  const visit = (value: any, depth = 0): string | undefined => {
-    if (!value || depth > 8) return undefined
-    const direct = toCss(value); if (direct) return direct
-    if (Array.isArray(value)) { for (const item of value) { const found = visit(item, depth + 1); if (found) return found } return undefined }
-    if (typeof value === 'object') {
-      for (const key of ['color', 'fill', 'fillColor', 'stroke', 'outline', 'outlineColor', 'symbol', 'symbolLayers']) { const found = visit(value[key], depth + 1); if (found) return found }
+  const findFill = (value: any, depth = 0): string | undefined => {
+    if (!value || depth > 10) return undefined
+    if (Array.isArray(value)) { for (const item of value) { const found = findFill(item, depth + 1); if (found) return found } return undefined }
+    if (typeof value !== 'object') return undefined
+    // Fill/symbolLayers têm prioridade: a legenda deve reproduzir o preenchimento,
+    // não a linha preta de contorno do polígono.
+    for (const key of ['fill', 'fillColor', 'symbolLayers']) {
+      const part = value[key]
+      if (Array.isArray(part)) { for (const layer of part) { if (layer?.type === 'CIMSymbolLayer' && layer?.layerType && !String(layer.layerType).toLowerCase().includes('fill')) continue; const found = findFill(layer, depth + 1); if (found) return found } }
+      else { const direct = toCss(part); if (direct) return direct; const found = findFill(part, depth + 1); if (found) return found }
     }
+    const direct = toCss(value.color); if (direct) return direct
+    for (const key of ['symbol', 'marker', 'graphic']) { const found = findFill(value[key], depth + 1); if (found) return found }
     return undefined
   }
   const candidate = symbol as any
-  return visit(candidate) || visit(candidate?.toJSON?.()) || fallback
+  return findFill(candidate) || findFill(candidate?.toJSON?.()) || fallback
 }
 
 
@@ -90,11 +96,11 @@ const drawCoordinateGrid = (context: CanvasRenderingContext2D, capture: CaptureR
     context.beginPath(); context.moveTo(mapX, py); context.lineTo(mapX + drawW, py); context.stroke()
     // Topo horizontal: somente X no topo.
     const xValue = xmin + ((xmax - xmin) * i) / gridCount
-    context.fillText(xValue.toFixed(0), px, mapY + 13)
+    context.fillText(xValue.toFixed(0), px, mapY - 7)
     // Lado esquerdo vertical: somente Y, crescendo visualmente de baixo para cima.
     const yValue = ymax - ((ymax - ymin) * i) / gridCount
-    context.textAlign = 'left'
-    context.fillText(yValue.toFixed(0), mapX + 5, py + 12)
+    context.textAlign = 'right'
+    context.fillText(yValue.toFixed(0), mapX - 6, py + 3)
     context.textAlign = 'center'
   }
   context.restore()
@@ -108,7 +114,7 @@ const drawPdfCoordinateGrid = (pdf: jsPDF, capture: CaptureResult, mapX: number,
     const px = mapX + (mapW * i) / gridCount; const py = mapY + (mapH * i) / gridCount
     pdf.line(px, mapY, px, mapY + mapH); pdf.line(mapX, py, mapX + mapW, py)
     pdf.text(String(Math.round(xmin + ((xmax - xmin) * i) / gridCount)), px, mapY - 2, { align: 'center' })
-    pdf.text(String(Math.round(ymax - ((ymax - ymin) * i) / gridCount)), mapX + 2, py + 2, { align: 'left' })
+    pdf.text(String(Math.round(ymax - ((ymax - ymin) * i) / gridCount)), mapX - 2, py + 2, { align: 'right' })
   }
 }
 
@@ -185,13 +191,13 @@ const composeInterferenceBoard = async (capture: CaptureResult, records: Interfe
 }
 
 const exportIndividualPdf = async (capture: CaptureResult, record: InterferenceRecord) => {
-  const image = await loadImage(capture.dataUrl); const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' }); const W=297,H=210,panelX=224,mapX=8,mapY=16,mapW=210,mapH=184
+  const image = await loadImage(capture.dataUrl); const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' }); const W=297,H=210,panelX=224,mapX=18,mapY=16,mapW=202,mapH=184
   pdf.setFillColor(244,240,232); pdf.rect(0,0,W,H,'F'); const ratio=Math.min(mapW/image.width,mapH/image.height); const dw=image.width*ratio,dh=image.height*ratio; const ix=mapX+(mapW-dw)/2,iy=mapY+(mapH-dh)/2; pdf.addImage(image,'PNG',ix,iy,dw,dh); drawPdfCoordinateGrid(pdf,capture,ix,iy,dw,dh); pdf.setDrawColor(38,61,66); pdf.rect(ix,iy,dw,dh); pdf.setFillColor(255,255,255); pdf.rect(panelX,0,W-panelX,H,'F'); pdf.setFillColor(11,48,58); pdf.rect(panelX,0,W-panelX,38,'F'); pdf.setTextColor(255,255,255); pdf.setFont('helvetica','bold'); pdf.setFontSize(16); pdf.text('DF Legal',panelX+7,13); pdf.setFontSize(9); pdf.text('MAPA ANALISADO',panelX+7,23); pdf.setFont('helvetica','normal'); pdf.setFontSize(7); pdf.text('Interferência selecionada',panelX+7,31)
   let y=53; pdf.setTextColor(23,60,70); pdf.setFont('helvetica','bold'); pdf.setFontSize(11); pdf.text('IDENTIFICAÇÃO',panelX+7,y); y+=13; pdf.setFontSize(9); pdf.text(pdf.splitTextToSize(record.layerTitle,64),panelX+7,y); y+=12; pdf.setFont('helvetica','normal'); pdf.setFontSize(8); pdf.text(pdf.splitTextToSize(`Classe: ${classValue(record)}`,64),panelX+7,y); y+=16; pdf.setDrawColor(176,109,29); pdf.line(panelX+7,y,W-7,y); y+=12; pdf.setFont('helvetica','bold'); pdf.setFontSize(10); pdf.text('INFORMAÇÕES',panelX+7,y); y+=10; pdf.setFont('helvetica','normal'); pdf.setFontSize(7.5); pdf.text(pdf.splitTextToSize(`${geometryLabel(record.geometryType)} · ${String(record.attributes._relacao_espacial || 'interseção')}`,64),panelX+7,y); y+=10; Object.entries(record.attributes).filter(([key])=>!key.startsWith('_')).slice(0,10).forEach(([key,value])=>{ pdf.text(pdf.splitTextToSize(`${key}: ${String(value)}`,64),panelX+7,y); y+=7 }); y+=4; pdf.setDrawColor(143,48,53); pdf.line(panelX+7,y,W-7,y); y+=12; pdf.setFont('helvetica','bold'); pdf.setFontSize(10); pdf.text('LEGENDA',panelX+7,y); y+=9; classEntriesFor(record).forEach((entry)=>{ const rgb=cssRgb(symbolColor(entry.symbol,mapColorForLegend(record))); pdf.setFillColor(rgb[0],rgb[1],rgb[2]); pdf.rect(panelX+7,y-4,4,3,'F'); pdf.setTextColor(82,97,102); pdf.setFont('helvetica','normal'); pdf.setFontSize(7); pdf.text(pdf.splitTextToSize(`${record.layerTitle} — ${entry.label}`,57),panelX+14,y); y+=8 }); pdf.setFontSize(6); pdf.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`,panelX+7,H-8); pdf.save(`interferencia-${slug(record.layerTitle)}-${slug(record.id)}.pdf`)
 }
 
 const exportConsolidatedPdf = async (capture: CaptureResult, records: InterferenceRecord[]) => {
-  const image = await loadImage(capture.dataUrl); const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' }); const W=297,H=210,panelX=224,mapX=8,mapY=16,mapW=210,mapH=184
+  const image = await loadImage(capture.dataUrl); const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' }); const W=297,H=210,panelX=224,mapX=18,mapY=16,mapW=202,mapH=184
   pdf.setFillColor(244,240,232); pdf.rect(0,0,W,H,'F'); const ratio=Math.min(mapW/image.width,mapH/image.height); const dw=image.width*ratio,dh=image.height*ratio; const ix=mapX+(mapW-dw)/2,iy=mapY+(mapH-dh)/2; pdf.addImage(image,'PNG',ix,iy,dw,dh); drawPdfCoordinateGrid(pdf,capture,ix,iy,dw,dh); pdf.setDrawColor(38,61,66); pdf.rect(ix,iy,dw,dh); pdf.setFillColor(255,255,255); pdf.rect(panelX,0,W-panelX,H,'F'); pdf.setFillColor(11,48,58); pdf.rect(panelX,0,W-panelX,38,'F'); pdf.setTextColor(255,255,255); pdf.setFont('helvetica','bold'); pdf.setFontSize(16); pdf.text('DF Legal',panelX+7,13); pdf.setFontSize(9); pdf.text('MAPA ANALISADO',panelX+7,23); pdf.setFont('helvetica','normal'); pdf.setFontSize(7); pdf.text('Prancha consolidada',panelX+7,31)
   let y=53; pdf.setTextColor(23,60,70); pdf.setFont('helvetica','bold'); pdf.setFontSize(10); pdf.text('IDENTIFICAÇÃO',panelX+7,y); y+=12; pdf.setFont('helvetica','normal'); pdf.setFontSize(8); pdf.text(`Interferências: ${records.length}`,panelX+7,y); y+=7; pdf.text(`Camadas: ${new Set(records.map((record)=>record.layerId)).size}`,panelX+7,y); y+=15; pdf.setDrawColor(176,109,29); pdf.line(panelX+7,y,W-7,y); y+=12; pdf.setFont('helvetica','bold'); pdf.setFontSize(10); pdf.text('LEGENDA',panelX+7,y); y+=10; records.flatMap((record)=>classEntriesFor(record).map((entry)=>({record,entry}))).forEach(({record,entry})=>{ if(y>190){pdf.addPage(); y=20}; const rgb=cssRgb(symbolColor(entry.symbol,mapColorForLegend(record))); pdf.setFillColor(rgb[0],rgb[1],rgb[2]); pdf.rect(panelX+7,y-4,4,3,'F'); pdf.setTextColor(82,97,102); pdf.setFont('helvetica','normal'); pdf.setFontSize(6.5); pdf.text(pdf.splitTextToSize(`${record.layerTitle} — ${entry.label}`,57),panelX+14,y); y+=8 }); pdf.setFontSize(6); pdf.text(`Gerado em ${new Date().toLocaleString('pt-BR')}`,panelX+7,H-8); pdf.save(`prancha-consolidada-interferencias-${new Date().toISOString().slice(0,10)}.pdf`)
 }

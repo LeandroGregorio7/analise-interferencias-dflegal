@@ -250,7 +250,12 @@ export async function createInterferenceRuntime(
               : geometryEngine.overlaps(studyArea, graphic.geometry)
                 ? 'sobreposição'
                 : 'interseção'
-          const sourceSymbol = (entry.layer.renderer as any)?.getSymbol?.(graphic) ?? symbolFor(entry.geometryType!)
+          const renderer: any = entry.layer.renderer as any
+          const uniqueInfo = renderer?.uniqueValueInfos?.find((info: any) => {
+            const values = Array.isArray(info.value) ? info.value : [info.value]
+            return values.some((value: any) => Object.values(graphic.attributes || {}).some((attribute) => String(attribute) === String(value)))
+          })
+          const sourceSymbol = (graphic as any).symbol ?? renderer?.getSymbol?.(graphic) ?? uniqueInfo?.symbol ?? renderer?.symbol ?? symbolFor(entry.geometryType!)
           const clippedGraphic = new Graphic({ geometry: clippedGeometry, attributes: graphic.attributes, symbol: sourceSymbol })
           const objectId = graphic.attributes?.[entry.layer.objectIdField]
           // Uma mesma feição pode retornar mais de um fragmento (multipart/dissolve).
