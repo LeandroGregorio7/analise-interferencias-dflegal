@@ -153,6 +153,29 @@ const classLabelFor = (title: string, attributes: Record<string, unknown>) => {
 const compactLayer = (title: string) => { const name = normalized(title); return name.includes('lote') || name.includes('ocupac') }
 const identifierFields = ['ciu', 'uos', 'id', 'objectid', 'fid', 'codigo', 'numero']
 
+const rendererItems = (value: any): any[] => Array.isArray(value) ? value : Array.isArray(value?.items) ? value.items : []
+const rendererClass = (renderer: any, graphic: Graphic, geometryType: InterferenceGeometry) => {
+  const attributes = graphic.attributes || {}
+  if (!renderer) return { symbol: (graphic as any).symbol ?? symbolFor(geometryType), label: undefined as string | undefined }
+  if (renderer.type === 'unique-value' || renderer.uniqueValueInfos) {
+    const fields = [renderer.field, renderer.field2, renderer.field3].filter(Boolean)
+    const values = fields.map((field: string) => attributes[field])
+    const candidate = renderer.getUniqueValueInfo?.(graphic) || rendererItems(renderer.uniqueValueInfos).find((info: any) => {
+      const infoValues = Array.isArray(info.value) ? info.value : [info.value]
+      return infoValues.length === values.length && infoValues.every((value: any, index: number) => String(value) === String(values[index]))
+    })
+    if (candidate?.symbol) return { symbol: candidate.symbol, label: candidate.label || values.filter((value: any) => value !== undefined && value !== null).join(' · ') }
+  }
+  if (renderer.type === 'class-breaks' || renderer.classBreakInfos) {
+    const value = Number(attributes[renderer.field])
+    const breaks = rendererItems(renderer.classBreakInfos)
+    const candidate = breaks.find((info: any) => Number.isFinite(value) && value <= Number(info.maxValue))
+    if (candidate?.symbol) return { symbol: candidate.symbol, label: candidate.label || String(value) }
+  }
+  if (renderer.type === 'simple' || renderer.symbol) return { symbol: renderer.symbol || symbolFor(geometryType), label: undefined as string | undefined }
+  return { symbol: (graphic as any).symbol ?? symbolFor(geometryType), label: undefined as string | undefined }
+}
+
 export async function createInterferenceRuntime(
   container: HTMLDivElement,
   settings: { portalUrl: string; webMapId: string; clientId: string },
@@ -268,19 +291,14 @@ export async function createInterferenceRuntime(
                 ? 'sobreposição'
                 : 'interseção'
           const renderer: any = entry.layer.renderer as any
-          const fields = [renderer?.field, ...(renderer?.field2 ? [renderer.field2] : []), ...(renderer?.field3 ? [renderer.field3] : [])].filter(Boolean)
-          const values = fields.map((field: string) => graphic.attributes?.[field])
-          const uniqueInfo = renderer?.uniqueValueInfos?.find((info: any) => {
-            const infoValues = Array.isArray(info.value) ? info.value : [info.value]
-            return infoValues.length === values.length && infoValues.every((value: any, i: number) => String(value) === String(values[i]))
-          })
-          const sourceSymbol = (graphic as any).symbol ?? renderer?.getSymbol?.(graphic) ?? uniqueInfo?.symbol ?? renderer?.symbol ?? symbolFor(entry.geometryType!)
+          const resolved = rendererClass(renderer, graphic, entry.geometryType!)
+          const sourceSymbol = resolved.symbol
           const clippedGraphic = new Graphic({ geometry: clippedGeometry, attributes: graphic.attributes, symbol: sourceSymbol })
           const objectId = graphic.attributes?.[entry.layer.objectIdField]
           // Uma mesma feição pode retornar mais de um fragmento (multipart/dissolve).
           // A unidade selecionável deve ser a feição lógica, não cada fragmento.
           const attrs = displayAttributes(graphic)
-          const classLabel = classLabelFor(entry.title, attrs)
+          const classLabel = resolved.label || classLabelFor(entry.title, attrs)
           const aggregateByLayer = compactLayer(entry.title)
           // Uma camada representa uma única ocorrência lógica na busca.
           // Classes distintas permanecem separadas apenas na legenda/simbologia.

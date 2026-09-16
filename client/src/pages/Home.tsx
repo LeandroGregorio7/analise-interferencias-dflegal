@@ -97,8 +97,8 @@ const drawCoordinateGrid = (context: CanvasRenderingContext2D, capture: CaptureR
   for (let i = 0; i <= gridCount; i += 1) {
     const px = mapX + (drawW * i) / gridCount
     const py = mapY + (drawH * i) / gridCount
-    context.beginPath(); context.moveTo(px, mapY); context.lineTo(px, mapY + drawH); context.stroke()
-    context.beginPath(); context.moveTo(mapX, py); context.lineTo(mapX + drawW, py); context.stroke()
+    context.beginPath(); context.moveTo(px, mapY); context.lineTo(px, mapY - 5); context.stroke()
+    context.beginPath(); context.moveTo(mapX, py); context.lineTo(mapX - 5, py); context.stroke()
     // Topo horizontal: somente X no topo.
     const xValue = xmin + ((xmax - xmin) * i) / gridCount
     context.fillText(xValue.toFixed(0), px, mapY - 7)
@@ -117,7 +117,7 @@ const drawPdfCoordinateGrid = (pdf: jsPDF, capture: CaptureResult, mapX: number,
   pdf.setDrawColor(23, 60, 70); pdf.setTextColor(23, 60, 70); pdf.setLineWidth(0.15); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(4.5)
   for (let i = 0; i <= gridCount; i += 1) {
     const px = mapX + (mapW * i) / gridCount; const py = mapY + (mapH * i) / gridCount
-    pdf.line(px, mapY, px, mapY + mapH); pdf.line(mapX, py, mapX + mapW, py)
+    pdf.line(px, mapY, px, mapY - 1.5); pdf.line(mapX, py, mapX - 1.5, py)
     pdf.text(String(Math.round(xmin + ((xmax - xmin) * i) / gridCount)), px, mapY - 2, { align: 'center' })
     pdf.text(String(Math.round(ymax - ((ymax - ymin) * i) / gridCount)), mapX - 2, py + 2, { align: 'right' })
   }
@@ -178,7 +178,7 @@ const drawAttachmentPanel = (context: CanvasRenderingContext2D, records: Interfe
 
 
 const composeAttachmentPng = async (capture: CaptureResult, records: InterferenceRecord[], title: string, subtitle: string, filename: string) => {
-  const image = await loadImage(capture.dataUrl); const width = 1600; const height = 900; const panelW = 390; const mapX = 22; const mapY = 92; const mapW = width - panelW - 44; const mapH = height - 184
+  const image = await loadImage(capture.dataUrl); const width = 1600; const height = 900; const panelW = 390; const mapX = 92; const mapY = 112; const mapW = width - panelW - 116; const mapH = height - 204
   const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height; const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou a exportação.')
   context.fillStyle = '#F4F0E8'; context.fillRect(0, 0, width, height); context.fillStyle = '#FFFFFF'; context.fillRect(mapX, mapY - 20, mapW, mapH + 40)
   const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio; const imageX = mapX + (mapW - drawW) / 2; const imageY = mapY + (mapH - drawH) / 2
@@ -187,7 +187,7 @@ const composeAttachmentPng = async (capture: CaptureResult, records: Interferenc
 }
 
 const composeInterferenceBoard = async (capture: CaptureResult, records: InterferenceRecord[], format: 'png' | 'jpg') => {
-  const image = await loadImage(capture.dataUrl); const width = 1600; const height = 900; const panelW = 390; const mapX = 22; const mapY = 92; const mapW = width - panelW - 44; const mapH = height - 184
+  const image = await loadImage(capture.dataUrl); const width = 1600; const height = 900; const panelW = 390; const mapX = 92; const mapY = 112; const mapW = width - panelW - 116; const mapH = height - 204
   const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height; const context = canvas.getContext('2d'); if (!context) throw new Error('O navegador não disponibilizou a prancha de exportação.')
   context.fillStyle = '#F4F0E8'; context.fillRect(0, 0, width, height); context.fillStyle = '#FFFFFF'; context.fillRect(mapX, mapY - 20, mapW, mapH + 40)
   const ratio = Math.min(mapW / image.width, mapH / image.height); const drawW = image.width * ratio; const drawH = image.height * ratio; const imageX = mapX + (mapW - drawW) / 2; const imageY = mapY + (mapH - drawH) / 2
