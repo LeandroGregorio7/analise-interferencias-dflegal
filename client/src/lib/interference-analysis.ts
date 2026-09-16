@@ -15,6 +15,7 @@ import SimpleFillSymbol from '@arcgis/core/symbols/SimpleFillSymbol'
 import SimpleLineSymbol from '@arcgis/core/symbols/SimpleLineSymbol'
 import SimpleMarkerSymbol from '@arcgis/core/symbols/SimpleMarkerSymbol'
 import TextSymbol from '@arcgis/core/symbols/TextSymbol'
+import * as projection from '@arcgis/core/geometry/projection'
 import * as geometryEngine from '@arcgis/core/geometry/geometryEngine'
 import OAuthInfo from '@arcgis/core/identity/OAuthInfo'
 import esriId from '@arcgis/core/identity/IdentityManager'
@@ -51,6 +52,7 @@ export interface InterferenceRuntime {
   view: MapView
   layers: InterferenceLayerInfo[]
   drawStudyArea: () => Promise<Polygon | null>
+  setStudyArea: (geometry: Polygon) => Promise<Polygon>
   analyzeStudyArea: (studyArea: Polygon) => Promise<{ records: InterferenceRecord[]; errors: string[] }>
   highlightRecord: (record: InterferenceRecord) => Promise<void>
   isolateRecord: (record: InterferenceRecord) => Promise<void>
@@ -208,6 +210,21 @@ export async function createInterferenceRuntime(
       sketch.create('polygon')
     })
     return graphic?.geometry?.type === 'polygon' ? graphic.geometry as Polygon : null
+  }
+
+  const setStudyArea = async (geometry: Polygon) => {
+    studyLayer.removeAll()
+    resultLayer.removeAll()
+    labelLayer.removeAll()
+    const targetSpatialReference = view.spatialReference
+    await projection.load()
+    const projected = geometry.spatialReference?.wkid === targetSpatialReference?.wkid
+      ? geometry
+      : projection.project(geometry, targetSpatialReference) as Polygon
+    if (!projected || projected.type !== 'polygon') throw new Error('Não foi possível reprojetar a área importada para o sistema do mapa.')
+    studyLayer.add(new Graphic({ geometry: projected, symbol: new SimpleFillSymbol({ color: studyColor, outline: new SimpleLineSymbol({ color: '#D62D35', width: 3 }) }) }))
+    await view.goTo(projected, { duration: 500 })
+    return projected
   }
 
   const analyzeStudyArea = async (studyArea: Polygon) => {
@@ -440,6 +457,7 @@ export async function createInterferenceRuntime(
     view,
     layers,
     drawStudyArea,
+    setStudyArea,
     analyzeStudyArea,
     highlightRecord,
     isolateRecord,
